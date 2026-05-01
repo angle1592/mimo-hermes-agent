@@ -1,192 +1,112 @@
-# 🐱 小珀 — 基于 MiMo V2.5-Pro 的 AI 自动化助手系统
+# Hermes Agent 国内环境部署经验
 
-基于 [Hermes Agent](https://hermes.nousresearch.com) 搭建的 7×24 运行的 AI 自动化助手，以小米 MiMo V2.5-Pro 作为主模型，接入微信和钉钉双平台。
+用 [Hermes Agent](https://hermes.nousresearch.com) 搭了一个个人 AI 助手，跑了大半年，接入微信和钉钉。模型换过几次（DeepSeek → MiMo），配置和踩坑经验记在这里，供参考。
 
-一个真实运行的 AI Agent 生产环境案例，探索如何用 LLM 构建可持续、可扩展的个人 AI 助手系统。
+**不保证适合所有人。** 这是个人项目的记录，不是教程。很多选择是基于我自己的需求和 2C2G 小机器的限制，不一定是最优解。
 
-## 解决的核心痛点
+## 这是什么
 
-传统 AI 助手的使用存在三个关键瓶颈：
+一句话：一个跑在国内云服务器上的 Hermes Agent 实例，通过微信和钉钉与我交互，能记住上下文、调用工具、委派子任务。
 
-**1. 上下文割裂** — 每次对话都是独立的，无法积累项目知识、用户偏好和历史决策。当你提到"上次那个项目"，AI 完全不知道你在说什么。
+框架本身是 [Hermes Agent](https://hermes.nousresearch.com)，它负责消息路由、记忆管理、工具调用、多 Agent 协调这些核心能力。我做的事情主要是：
 
-**2. 工具孤岛** — AI 只能对话，无法操作文件、执行代码、调用 API、管理日程。需要人工在 AI 和工具之间反复搬运信息。
+- 选择和配置适合国内使用的模型提供商
+- 对接微信和钉钉的 gateway
+- 一些日常使用的 skill 和自动化脚本
+- 在低配机器上跑起来的经验
 
-**3. 单线程瓶颈** — 复杂任务（如"帮我做一份技术调研报告"）需要多步推理、信息收集、分析综合，单一模型串行处理既慢又容易丢失上下文。
+## 快速开始
 
-小珀通过 **持久记忆 + 工具调用 + 多 Agent 协作** 三位一体解决这些问题。
+```bash
+# 安装
+pip install hermes-agent
+hermes init
 
-## 核心逻辑流
+# 配置模型（以 MiMo 为例，换其他模型同理）
+# 编辑 ~/.hermes/config.yaml，参考 config/config.example.yaml
+hermes config set models.main.provider xiaomi
+hermes config set models.main.model mimo-v2.5-pro
 
-```
-用户消息（微信/钉钉）
-    │
-    ▼
-┌─────────────────────────────────┐
-│   Gateway（消息路由层）           │
-│   ├── 钉钉 Stream Mode          │
-│   └── 微信 itchat-uos           │
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│   主 Agent（MiMo V2.5-Pro）     │
-│   ├── 加载持久记忆               │
-│   │   ├── 用户画像               │
-│   │   ├── 项目上下文              │
-│   │   └── 历史会话摘要            │
-│   ├── 加载匹配的 Skill           │
-│   └── 决策：直接回答 or 委派子任务 │
-└──────┬──────────────┬───────────┘
-       │              │
-    直接回答      ┌────▼────────────────┐
-       │         │  子 Agent 委派层       │
-       │         │  ┌──────────────────┐ │
-       │         │  │ 研究 Agent (web) │ │
-       │         │  │ 代码 Agent (term)│ │
-       │         │  │ 分析 Agent (file)│ │
-       │         │  └──────────────────┘ │
-       │         │  支持并行执行 + 嵌套委派 │
-       │         └────┬────────────────┘
-       │              │
-       ▼              ▼
-┌─────────────────────────────────┐
-│   工具执行层                      │
-│   ├── 终端（shell 命令、git）     │
-│   ├── 文件系统（读写、搜索）      │
-│   ├── 浏览器（Playwright MCP）   │
-│   ├── Web 搜索（DuckDuckGo）     │
-│   ├── SQLite 数据库              │
-│   └── 定时任务引擎（cron）        │
-└─────────────┬───────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│   响应 + 记忆更新                 │
-│   ├── 格式化输出（适配平台）       │
-│   ├── 更新持久记忆               │
-│   └── 保存会话到 state.db        │
-└─────────────┬───────────────────┘
-              │
-              ▼
-        用户收到回复（微信/钉钉）
+# 启动网关
+hermes gateway start
 ```
 
-### 多 Agent 协作模式
+完整的配置说明见 [config/config.example.yaml](config/config.example.yaml)（含详细注释）。
 
-面对复杂任务，主 Agent 会自动拆解并委派：
+## 当前配置
 
-**示例：「帮我调研 MiMo 模型的技术特点并写一份报告」**
+| 组件 | 选型 | 备注 |
+|------|------|------|
+| 框架 | Hermes Agent | 开源 Agent 框架 |
+| 主模型 | MiMo V2.5-Pro | 小米，通过 OpenAI 兼容接口接入 |
+| 辅助模型 | DeepSeek V4 Pro / Flash | 子代理和辅助任务 |
+| 消息平台 | 微信 + 钉钉 | 微信用 itchat-uos，钉钉用 Stream Mode |
+| MCP 工具 | Playwright、SQLite、Sequential Thinking | 浏览器自动化、数据存储、分步推理 |
+| 部署 | Alibaba Cloud Linux | 2 vCPU / 2GB RAM |
 
-```
-主 Agent（MiMo V2.5-Pro）
-    │
-    ├─→ 子 Agent 1（DeepSeek V4 Pro）
-    │   任务：搜索 MiMo 技术论文和评测
-    │   工具：web_search, web_extract
-    │   输出：技术要点摘要
-    │
-    ├─→ 子 Agent 2（DeepSeek V4 Pro）
-    │   任务：分析定价策略和竞品对比
-    │   工具：web_search, terminal（数据计算）
-    │   输出：对比分析表
-    │
-    ├─→ 子 Agent 3（DeepSeek V4 Pro）
-    │   任务：查询实际 Token 使用数据
-    │   工具：terminal（SQLite 查询 state.db）
-    │   输出：历史消耗统计
-    │
-    └─→ 主 Agent 综合所有子任务结果
-        生成：完整调研报告
-```
+模型不是固定的。之前用 DeepSeek 做主力，现在换成了 MiMo，以后可能还会变。Hermes 支持任何 OpenAI 兼容的 API，换模型只需改配置。
 
-### 长链推理链路
+## 模型切换经验
 
-当任务需要多步推理时，系统支持深度推理链：
+不同模型各有特点，没有银弹。以下是我用过的：
 
-```
-用户：「部署有个 bug，帮我排查」
-    │
-    ├─ Step 1：读取错误日志 → 提取关键异常
-    ├─ Step 2：定位相关源码文件 → 分析逻辑
-    ├─ Step 3：搜索 Stack Overflow / GitHub Issues
-    ├─ Step 4：生成修复方案 → 写入文件
-    ├─ Step 5：运行测试验证
-    └─ Step 6：提交 commit + 生成变更说明
-```
+| 模型 | 适合 | 不适合 |
+|------|------|--------|
+| MiMo V2.5-Pro | 推理、代码、中文理解 | 工具调用偶尔不稳定 |
+| DeepSeek V4 Pro | 综合能力强、工具调用稳定 | 价格稍高 |
+| DeepSeek V4 Flash | 速度快、便宜 | 复杂推理弱 |
 
-每一步的输出作为下一步的输入，推理链可长达 10+ 步，中间结果持久化在会话上下文中。
+实际使用中，主模型和辅助模型搭配效果比单一模型好。比如用 MiMo 做主力推理，子代理用 DeepSeek 处理并行任务。
 
-## 实际使用场景
+## 实际跑起来的一些数据
 
-| 场景 | 触发方式 | 处理流程 |
-|------|---------|---------|
-| 每日自动汇报 | 定时任务 5:30 | 查询日历/待办 → 生成早安推送 |
-| 代码审查 | 发送 GitHub PR 链拉取 diff → 逐文件分析 → 生成评审意见 |
-| 技术调研 | 自然语言描述需求 → 多 Agent 并行搜索 → 综合生成报告 |
-| 文件处理 | 发送 PDF/文档 → OCR 提取 → 分析总结 |
-| 系统运维 | SSH 到服务器 → 执行命令 → 返回结果 |
+仅供参考，不同使用强度差异很大：
 
-## Token 使用情况
+- 日均 Token 消耗：1,000~3,000 万（高强度日会更多）
+- 缓存命中率：97% 以上（Hermes 的 context caching 机制）
+- 月成本：十几到二十几块钱（MiMo 定价比较便宜）
+- 在 2C2G 机器上能跑，但复杂任务会比较慢
 
-实际生产环境中的 Token 消耗数据：
+## 常用场景
 
-| 指标 | 数值 |
-|------|------|
-| 日均消耗 | 1,000~3,000 万 tokens |
-| 单次会话 | 200~800 万 tokens |
-| 缓存命中率 | 97%+ |
-| 月均成本 | ¥12~24 |
+我日常用得比较多的几个：
 
-## 技术栈
+- **定时推送** — 每天早上自动汇总日程和待办，推到钉钉群
+- **代码相关** — 发 PR 链接让它做 review，或者让它帮忙排查问题
+- **信息收集** — 描述一个话题，它会拆成几个子任务并行搜索，汇总成报告
+- **文件处理** — 发 PDF 过去，提取文字后分析总结
+- **服务器运维** — 直接在对话里执行 shell 命令，查日志、改配置
 
-| 组件 | 说明 |
-|------|------|
-| 主模型 | Xiaomi MiMo V2.5-Pro（主力推理） |
-| 辅助模型 | DeepSeek V4 Pro / Flash（子代理、辅助任务） |
-| 框架 | Hermes Agent v0.12.0 |
-| 平台 | 微信 + 钉钉 |
-| MCP 工具 | Playwright（浏览器）、Sequential Thinking（推理）、SQLite |
-| 监控 | 自建 Token 用量面板（Nginx + systemd） |
-| 部署 | Alibaba Cloud Linux，2 vCPU / 2GB RAM |
+这些都是 Hermes 本身的能力，不是我额外开发的。我只是做了配置和一些自定义 skill。
 
 ## 项目结构
 
 ```
-├── README.md                          # 本文件
+├── README.md
 ├── config/
-│   └── config.example.yaml            # 配置模板（含详细注释）
+│   └── config.example.yaml        # 配置模板（含注释）
 ├── docs/
-│   ├── deployment-guide.md            # 完整部署指南
-│   └── mimo-integration.md            # MiMo 集成实践文档
+│   ├── deployment-guide.md        # 部署步骤
+│   └── mimo-integration.md        # MiMo 接入笔记
 ├── scripts/
-│   └── token_monitor.py               # Token 用量监控面板
-├── xiao-po-skill.md                   # 小珀角色设定 Skill
-└── source-patches-skill.md            # 源码修改管理 Skill
+│   └── token_monitor.py           # Token 用量监控（Web 面板）
+├── xiao-po-skill.md               # 一个自定义角色 skill 示例
+└── source-patches-skill.md        # 源码修改管理 skill 示例
 ```
 
-## 快速开始
+## 已知限制
 
-详见 [部署指南](docs/deployment-guide.md)
+- 2C2G 机器跑多 Agent 并行时会卡，建议 4G 以上内存
+- 微信用的是 itchat-uos 协议，有封号风险，建议用小号
+- 国内网络环境需要处理 GitHub 和部分 API 的访问问题
+- 长对话会话偶尔会漂移，需要靠 skill 和记忆机制纠正
 
-```bash
-# 安装 Hermes Agent
-pip install hermes-agent
-hermes init
+## 相关项目
 
-# 配置 MiMo 模型
-export XIAOMI_API_KEY="your-api-key"
-# 编辑 ~/.hermes/config.yaml，参考 config/config.example.yaml
+- [Hermes Agent](https://hermes.nousresearch.com) — 本项目使用的框架
+- [MiMo](https://github.com/XiaomiMiMo/MiMo) — 小米自研推理模型
+- [DeepSeek](https://github.com/deepseek-ai) — 另一个好用的国产模型
 
-# 启动
-hermes gateway start
+## License
 
-# 启动 Token 监控面板
-python3 scripts/token_monitor.py
-```
-
-## 相关链接
-
-- [Hermes Agent 官方文档](https://hermes.nousresearch.com)
-- [小米 MiMo 模型](https://github.com/XiaomiMiMo/MiMo)
-- [MiMo V2.5-Pro 集成实践](docs/mimo-integration.md)
+MIT
