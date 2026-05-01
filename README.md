@@ -36,3 +36,38 @@
 
 - [Hermes Agent 官方文档](https://hermes.nousresearch.com)
 - [小米 MiMo 模型](https://github.com/XiaomiMiMo/MiMo)
+
+## 项目结构
+
+```
+├── README.md                          # 项目说明
+├── config/
+│   └── config.example.yaml            # 配置模板（含详细注释）
+├── docs/
+│   ├── deployment-guide.md            # 完整部署指南
+│   └── mimo-integration.md            # MiMo 集成实践文档
+├── scripts/
+│   └── token_monitor.py               # Token 用量监控面板
+├── xiao-po-skill.md                   # 小珀角色设定 Skill
+└── source-patches-skill.md            # 源码修改管理 Skill
+```
+
+## 快速开始
+
+详见 [部署指南](docs/deployment-guide.md)
+
+```bash
+# 安装 Hermes Agent
+pip install hermes-agent
+hermes init
+
+# 配置 MiMo 模型
+export XIAOMI_API_KEY="your-api-key"
+# 编辑 ~/.hermes/config.yaml，参考 config/config.example.yaml
+
+# 启动
+hermes gateway start
+
+# 启动 Token 监控面板
+python3 scripts/token_monitor.py
+```
