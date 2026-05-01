@@ -1,0 +1,97 @@
+# Hermes Agent 配置文件示例
+#
+# 这是从实际运行实例中脱敏后的真实配置。
+# 不是所有字段都需要，Hermes 有合理的默认值。
+# 完整配置说明见: hermes --help 或官方文档
+
+# ── 模型 ──────────────────────────────────────────────────
+model:
+  default: mimo-v2.5-pro         # 主模型
+  reasoning_effort: xhigh        # 推理强度: low/medium/high/xhigh
+  provider: xiaomi               # 提供商
+
+# 备用提供商（主模型不可用时自动切换）
+fallback_providers: deepseek
+
+# ── 辅助模型 ──────────────────────────────────────────────
+# Hermes 内部用辅助模型做视觉理解、网页提取、上下文压缩等。
+# 不需要跟主模型一样贵，用便宜快速的就行。
+auxiliary:
+  vision:
+    provider: deepseek
+    model: deepseek-v4-flash
+  web_extract:
+    provider: deepseek
+    model: deepseek-v4-flash
+  compression:
+    provider: deepseek
+    model: deepseek-v4-pro        # 压缩用稍好一点的模型
+  session_search:
+    provider: deepseek
+    model: deepseek-v4-flash
+
+# ── 子代理 (Delegation) ───────────────────────────────────
+delegation:
+  model: deepseek-v4-pro
+  provider: deepseek
+  max_concurrent_children: 3     # 并行子代理数，2G 内存建议 2-3
+  max_spawn_depth: 1             # 嵌套层数
+  orchestrator_enabled: true
+  child_timeout_seconds: 600
+
+# ── 终端 ──────────────────────────────────────────────────
+terminal:
+  backend: local
+  timeout: 180                   # 命令超时（秒）
+  persistent_shell: true
+
+# ── 浏览器 ────────────────────────────────────────────────
+browser:
+  inactivity_timeout: 120
+  allow_private_urls: false
+
+# ── 消息平台 ──────────────────────────────────────────────
+platforms:
+  dingtalk:
+    enabled: true
+    home_channel:
+      platform: dingtalk
+      chat_id: "你的钉钉群ID"      # 替换为实际值
+    extra:
+      client_id: "你的ClientID"     # 替换为实际值
+      client_secret: "你的ClientSecret"
+
+# ── MCP 服务器 ────────────────────────────────────────────
+mcp_servers:
+  playwright:
+    command: npx
+    args: ["-y", "@playwright/mcp"]
+    timeout: 120
+  sequential-thinking:
+    command: npx
+    args: ["-y", "mcp-sequentialthinking-tools"]
+    timeout: 60
+  sqlite:
+    command: npx
+    args: ["-y", "mcp-server-sqlite", "--db-path", "/root/.hermes/data.db"]
+    timeout: 30
+
+# ── 记忆 ──────────────────────────────────────────────────
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 2200
+  user_char_limit: 1375
+
+# ── 上下文压缩 ────────────────────────────────────────────
+compression:
+  enabled: true
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+
+# ── 日志 ──────────────────────────────────────────────────
+logging:
+  level: INFO
+  max_size_mb: 5
+  backup_count: 3

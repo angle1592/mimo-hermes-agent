@@ -18,20 +18,22 @@
 ## 快速开始
 
 ```bash
-# 安装
-pip install hermes-agent
-hermes init
+# 克隆仓库
+git clone https://github.com/angle1592/mimo-hermes-agent.git
+cd mimo-hermes-agent
 
-# 配置模型
-# 编辑 ~/.hermes/config.yaml，参考 config/ 目录下的说明
-hermes config set models.main.provider deepseek
-hermes config set models.main.model deepseek-v4-pro
+# 一键部署（安装 Hermes、Token 监控、Nginx）
+sudo bash scripts/setup.sh
 
-# 启动网关
+# 手动配置模型
+hermes config set model.default deepseek-v4-pro
+echo 'DEEPSEEK_API_KEY=sk-xxx' >> ~/.hermes/.env
+
+# 启动
 hermes gateway start
 ```
 
-模型接入方式见 [Hermes Agent 官方文档](https://hermes.nousresearch.com/docs)。
+详细步骤见 [部署指南](docs/deployment-guide.md)，踩坑见 [踩坑记录](docs/pitfalls.md)。
 
 ## 当前配置
 
@@ -85,11 +87,20 @@ hermes gateway start
 ```
 ├── README.md
 ├── config/
-│   └── config.example.yaml        # 配置说明
+│   ├── config.example.yaml        # 配置说明
+│   └── config.yaml.example        # 脱敏后的真实配置参考
+├── deploy/
+│   ├── nginx/
+│   │   └── hermes.conf            # Nginx 反代配置
+│   └── systemd/
+│       ├── hermes-dashboard.service
+│       └── hermes-token-monitor.service
 ├── docs/
 │   ├── deployment-guide.md        # 部署步骤
-│   └── mimo-integration.md        # MiMo 接入笔记
+│   ├── mimo-integration.md        # MiMo 接入笔记
+│   └── pitfalls.md                # 踩坑记录
 ├── scripts/
+│   ├── setup.sh                   # 一键部署脚本
 │   └── token_monitor.py           # Token 用量监控（Web 面板）
 └── .gitignore
 ```

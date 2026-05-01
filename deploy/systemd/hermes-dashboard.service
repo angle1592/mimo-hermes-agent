@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes Agent Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/lib/hermes-agent
+Environment=HOME=/root
+Environment=PATH=/root/.hermes/node/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/bin/hermes dashboard --host 127.0.0.1 --port 9119 --no-open
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

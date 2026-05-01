@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes Token Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.hermes/token_monitor
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/usr/bin/python3 /root/.hermes/token_monitor/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
