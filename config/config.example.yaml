@@ -1,414 +1,48 @@
-# =============================================================================
-# Hermes Agent 配置文件模板 (config.example.yaml)
-# =============================================================================
-# 使用前请复制为 config.yaml 并填入真实凭据与参数。
-# 本文件展示 MiMo 模型体系的完整配置方式，包括模型提供商、钉钉/微信网关、
-# 定时任务、MCP 服务器、技能等所有模块。
-# =============================================================================
+# Hermes Agent 配置说明
+#
+# 本文件不是可直接使用的配置模板。
+# Hermes Agent 的真实配置格式请参考官方文档：
+# https://hermes.nousresearch.com/docs
+#
+# 以下记录我在实际部署中用到的关键配置项和思路，供参考。
+# 具体字段名和结构以 Hermes 官方文档为准。
 
-# ---------------------------------------------------------------------------
-# 1. 全局设置
-# ---------------------------------------------------------------------------
-global:
-  # 工作目录，所有相对路径以此为基准
-  work_dir: "/var/lib/hermes-agent"
-  # 日志级别: debug | info | warn | error
-  log_level: "info"
-  # 日志输出路径
-  log_file: "/var/log/hermes-agent/agent.log"
-  # 会话存储后端: memory | sqlite | redis
-  session_store: "sqlite"
-  # SQLite 会话数据库路径 (session_store=sqlite 时生效)
-  session_db: "/var/lib/hermes-agent/sessions.db"
-  # 最大并发对话数
-  max_concurrent_sessions: 20
+# ── 模型接入 ──────────────────────────────────────────────
+# Hermes 支持任何 OpenAI 兼容 API 的模型。
+# 配置方式是在 config.yaml 的 models 部分指定 provider、model、api_key 等。
+#
+# 示例（以 DeepSeek 为例）：
+#   models:
+#     main:
+#       provider: deepseek
+#       model: deepseek-v4-pro
+#       api_key_env: DEEPSEEK_API_KEY
+#
+# MiMo 也通过 OpenAI 兼容接口接入，端点为 https://api.xiaomimimo.com/v1
+# 详见 docs/mimo-integration.md
 
-# ---------------------------------------------------------------------------
-# 2. 模型配置
-# ---------------------------------------------------------------------------
-# MiMo 模型体系：主模型由 xiaomi 提供商承载，deepseek 作为降级备用。
-# 支持 OpenAI 兼容 API 协议，可按需扩展其他提供商。
-models:
-  # --- 全局默认参数，所有模型继承 ---
-  defaults:
-    temperature: 0.7
-    max_tokens: 4096
-    top_p: 0.9
-    # 请求超时时间 (秒)
-    timeout: 120
-    # 最大重试次数
-    max_retries: 3
+# ── 消息平台 Gateway ─────────────────────────────────────
+# Hermes 内置了钉钉和微信的 gateway 支持。
+# 钉钉推荐用 Stream 模式（不需要公网回调 URL）。
+# 微信用 weixin gateway（基于 itchat-uos 协议）。
+#
+# 具体配置方式：hermes config set gateway.dingtalk.xxx 或编辑 config.yaml
 
-  # --- 主模型：MiMo v2.5 Pro ---
-  main:
-    name: "mimo-v2.5-pro"               # 模型标识名
-    provider: "xiaomi"                   # 提供商：xiaomi
-    api_base: "https://api.xiaomi.com/v1"  # Xiaomi API 端点
-    # 从环境变量 HERMES_XIAOMI_API_KEY 读取，也可直接填写
-    api_key_env: "HERMES_XIAOMI_API_KEY"
-    # 覆盖全局默认参数（可选）
-    temperature: 0.6                     # MiMo 推荐使用较低温度以提高稳定性
-    max_tokens: 8192
-    # 系统提示词 (可被网关/技能级别的 prompt 覆盖)
-    system_prompt: |
-      你是 MiMo，由小米 AI 团队打造的智能助手。
-      你知识渊博、回答精准，优先使用中文回复。
-      遇到不确定的问题时主动说明，不要编造信息。
+# ── MCP 工具 ──────────────────────────────────────────────
+# 以下 MCP 服务器在实际使用中效果不错：
+#   - playwright: 浏览器自动化（截图、点击、填表）
+#   - sequential-thinking: 分步推理
+#   - sqlite: 结构化数据查询
+#
+# 配置方式见 Hermes 官方文档的 MCP 章节。
 
-  # --- 备用模型：DeepSeek V4 Pro ---
-  fallback:
-    name: "deepseek-v4-pro"
-    provider: "deepseek"
-    api_base: "https://api.deepseek.com/v1"
-    api_key_env: "HERMES_DEEPSEEK_API_KEY"
-    temperature: 0.7
-    max_tokens: 4096
-    # 当主模型连续失败 N 次后自动切换
-    failover_threshold: 3
-    # 故障恢复检测间隔 (秒)，尝试切回主模型
-    recovery_interval: 300
+# ── 定时任务 ──────────────────────────────────────────────
+# Hermes 内置 cron 功能，可通过 hermes cron 命令或 config.yaml 配置。
+# 我主要用来做每日定时推送和系统健康检查。
 
-  # --- 其他可选模型 (按需启用) ---
-  extra:
-    # 轻量模型，用于简单意图识别
-    - name: "mimo-v2.5-lite"
-      provider: "xiaomi"
-      api_base: "https://api.xiaomi.com/v1"
-      api_key_env: "HERMES_XIAOMI_API_KEY"
-      temperature: 0.3
-      max_tokens: 2048
-    # 本地模型示例 (Ollama)
-    - name: "qwen2.5:14b"
-      provider: "ollama"
-      api_base: "http://localhost:11434/v1"
-      temperature: 0.7
-      max_tokens: 4096
-
-# ---------------------------------------------------------------------------
-# 3. 网关配置 - 钉钉 (DingTalk)
-# ---------------------------------------------------------------------------
-gateways:
-  dingtalk:
-    # 是否启用钉钉网关
-    enabled: true
-    # 接入模式: stream (流式长连接) | webhook (回调)
-    mode: "stream"
-    # --- Stream 模式专用配置 ---
-    stream:
-      # 钉钉开放平台应用的 Client ID
-      client_id_env: "DINGTALK_CLIENT_ID"
-      # 钉钉开放平台应用的 Client Secret
-      client_secret_env: "DINGTALK_CLIENT_SECRET"
-      # 订阅的 Topic 列表 (支持多 Topic)
-      topics:
-        - "/v1.0/im/bot/messages"       # 机器人消息
-        - "/v1.0/im/groupMessages"      # 群聊消息 (可选)
-      # Stream 断线重连配置
-      reconnect:
-        initial_delay: 1                 # 首次重连延迟 (秒)
-        max_delay: 60                    # 最大重连间隔 (秒)
-        backoff_multiplier: 2           # 退避倍数
-    # --- 通用配置 ---
-    # 机器人 AppKey
-    app_key_env: "DINGTALK_APP_KEY"
-    # 机器人 AppSecret
-    app_secret_env: "DINGTALK_APP_SECRET"
-    # 消息处理并发数
-    concurrency: 10
-    # 单次回复最大长度 (字节)，超出自动拆分
-    max_reply_length: 20480
-    # 支持的 @ 触发方式
-    mention_trigger: true                # @机器人触发
-    dm_trigger: true                     # 单聊直接触发
-    # 群聊白名单 (群 ID 列表，空表示所有群可用)
-    group_whitelist: []
-    # 用户黑名单 (用户 ID 列表)
-    user_blacklist: []
-
-  # -------------------------------------------------------------------------
-  # 4. 网关配置 - 微信 (WeChat)
-  # -------------------------------------------------------------------------
-  wechat:
-    enabled: true
-    # 微信接入方式: official (公众号) | personal (个人号 via itchat/compatible)
-    mode: "official"
-    # --- 公众号模式 ---
-    official:
-      # 微信公众号 AppID
-      app_id_env: "WECHAT_APP_ID"
-      # 微信公众号 AppSecret
-      app_secret_env: "WECHAT_APP_SECRET"
-      # 服务器配置 Token (用于验证 URL)
-      token_env: "WECHAT_TOKEN"
-      # 消息加解密密钥 (EncodingAESKey)
-      encoding_aes_key_env: "WECHAT_AES_KEY"
-      # 对外暴露的消息回调路径
-      callback_path: "/wechat/callback"
-    # --- 个人号模式 (可选) ---
-    personal:
-      # itchat / WeChaty 等兼容层
-      driver: "itchat"
-      # 登录状态缓存文件
-      cache_file: "/var/lib/hermes-agent/wechat_login.pkl"
-    # 消息处理并发数
-    concurrency: 5
-    # 最大回复长度
-    max_reply_length: 2048
-    # 自动通过好友请求
-    auto_accept_friend: false
-    # 群聊白名单（群名或群 ID）
-    group_whitelist: []
-    # 用户黑名单
-    user_blacklist: []
-
-# ---------------------------------------------------------------------------
-# 5. 定时任务 (Cron Jobs)
-# ---------------------------------------------------------------------------
-cron:
-  # 时区
-  timezone: "Asia/Shanghai"
-  jobs:
-    # --- 每日早报推送 (5:30 AM) ---
-    - name: "daily_morning_briefing"
-      schedule: "30 5 * * *"            # 每天 05:30 执行
-      enabled: true
-      # 任务类型: push_message | data_sync | cleanup | custom_script
-      type: "push_message"
-      # 推送目标网关: dingtalk | wechat | all
-      target_gateway: "dingtalk"
-      # 使用的模型
-      model: "mimo-v2.5-pro"
-      # 推送给特定群/用户 (钉钉群 ID 或微信 OpenID 列表)
-      recipients:
-        - "dingtalk_group:YOUR_GROUP_ID"
-      # 早报生成的提示词模板
-      prompt_template: |
-        请生成一份今日早报，包含以下内容：
-        1. 今日天气概况
-        2. 热点新闻摘要 (3-5 条)
-        3. 历史上的今天
-        4. 每日一句
-        语言风格简洁专业，适合企业群推送。
-
-    # --- 每小时健康检查 ---
-    - name: "health_check"
-      schedule: "0 * * * *"             # 每小时整点
-      enabled: true
-      type: "custom_script"
-      script: "/usr/local/bin/hermes-health-check.sh"
-      # 失败时告警通知
-      on_failure:
-        notify_gateway: "dingtalk"
-        notify_recipient: "dingtalk_user:ADMIN_USER_ID"
-
-    # --- 每日会话数据清理 ---
-    - name: "session_cleanup"
-      schedule: "0 3 * * *"             # 每天凌晨 3:00
-      enabled: true
-      type: "cleanup"
-      # 保留最近 N 天的会话记录
-      retention_days: 30
-
-    # --- 模型用量统计 (每周一 9:00) ---
-    - name: "weekly_usage_report"
-      schedule: "0 9 * * 1"
-      enabled: false
-      type: "push_message"
-      target_gateway: "dingtalk"
-      model: "mimo-v2.5-lite"
-      prompt_template: |
-        请统计过去一周的模型调用情况，生成用量报告。
-
-# ---------------------------------------------------------------------------
-# 6. MCP 服务器 (Model Context Protocol)
-# ---------------------------------------------------------------------------
-# MCP 扩展 Agent 的工具调用能力，每个 MCP 服务器提供一组工具。
-mcp:
-  # 全局 MCP 设置
-  defaults:
-    # 启动超时 (秒)
-    startup_timeout: 30
-    # 单次工具调用超时 (秒)
-    tool_timeout: 60
-    # 失败后自动重启
-    auto_restart: true
-
-  servers:
-    # --- Playwright 浏览器自动化 ---
-    - name: "playwright"
-      enabled: true
-      # 启动方式: stdio (标准输入输出) | sse (Server-Sent Events)
-      transport: "stdio"
-      # 启动命令
-      command: "npx"
-      args:
-        - "-y"
-        - "@anthropic/mcp-server-playwright"
-      # 环境变量
-      env:
-        PLAYWRIGHT_BROWSERS_PATH: "/var/lib/hermes-agent/playwright-browsers"
-        # 以无头模式运行浏览器
-        HEADLESS: "true"
-      # 工具白名单 (空表示全部启用)
-      tool_allowlist:
-        - "navigate"
-        - "screenshot"
-        - "click"
-        - "fill"
-        - "evaluate"
-        - "get_content"
-      # 工具黑名单
-      tool_denylist: []
-      # 描述 (供 Agent 日志和调试)
-      description: "浏览器自动化工具，可截图、点击、填表、执行 JS"
-
-    # --- 顺序思维 (Sequential Thinking) ---
-    - name: "sequential-thinking"
-      enabled: true
-      transport: "stdio"
-      command: "npx"
-      args:
-        - "-y"
-        - "@anthropic/mcp-server-sequential-thinking"
-      # 无额外环境变量
-      env: {}
-      tool_allowlist:
-        - "sequentialthinking"
-      description: "多步推理工具，用于分解复杂问题逐步求解"
-
-    # --- SQLite 数据库查询 ---
-    - name: "sqlite"
-      enabled: true
-      transport: "stdio"
-      command: "npx"
-      args:
-        - "-y"
-        - "@anthropic/mcp-server-sqlite"
-      env:
-        # SQLite 数据库文件路径
-        SQLITE_DB_PATH: "/var/lib/hermes-agent/data.db"
-      tool_allowlist:
-        - "query"
-        - "list_tables"
-        - "describe_table"
-      # 只读模式限制 (仍可通过 SQL 控制，此处仅为元数据标注)
-      read_only: false
-      description: "SQLite 数据库查询工具，可执行 SQL、查看表结构"
-
-# ---------------------------------------------------------------------------
-# 7. 技能配置 (Skills)
-# ---------------------------------------------------------------------------
-# 技能是可插拔的功能模块，可动态加载。
-skills:
-  # 技能存放目录
-  directory: "/etc/hermes-agent/skills"
-  # 自动从技能目录加载
-  auto_load: true
-  # 已启用的技能列表
-  enabled:
-    # --- Hermes Agent 自述技能 ---
-    # 当用户询问 Hermes Agent 本身的配置、使用方法时，自动加载此技能。
-    # 调用方式: skill_view(name='hermes-agent')
-    - name: "hermes-agent"
-      # 技能文件路径 (相对于 directory)
-      path: "hermes-agent.md"
-      # 触发条件：当用户消息匹配以下关键词时自动激活
-      triggers:
-        - "hermes"
-        - "hermes agent"
-        - "配置"
-        - "怎么用"
-        - "使用说明"
-        - "帮助"
-      # 优先级 (数字越大越优先，用于多技能冲突时的选择)
-      priority: 100
-      description: "Hermes Agent 自身的帮助文档和使用指南"
-
-    # --- 代码解释器技能 ---
-    - name: "code-interpreter"
-      path: "code-interpreter.md"
-      triggers:
-        - "运行代码"
-        - "执行"
-        - "python"
-        - "跑一下"
-      priority: 80
-      # 技能级模型覆盖 (可选，此技能使用轻量模型节省成本)
-      model_override: "mimo-v2.5-lite"
-      # 沙箱配置
-      sandbox:
-        enabled: true
-        timeout: 30                    # 代码执行超时 (秒)
-        max_memory_mb: 256
-
-    # --- 文档问答技能 (RAG) ---
-    - name: "doc-qa"
-      path: "doc-qa.md"
-      triggers:
-        - "文档"
-        - "手册"
-        - "说明文档"
-        - "怎么看"
-      priority: 70
-      # 向量数据库配置
-      vector_store:
-        type: "chroma"                  # chroma | faiss | milvus
-        path: "/var/lib/hermes-agent/vector_store"
-        collection: "hermes_docs"
-
-    # --- 联网搜索技能 ---
-    - name: "web-search"
-      path: "web-search.md"
-      triggers:
-        - "搜索"
-        - "查一下"
-        - "最新"
-        - "新闻"
-      priority: 60
-      # 搜索引擎配置
-      search:
-        engine: "tavily"                # tavily | brave | serper
-        api_key_env: "TAVILY_API_KEY"
-        max_results: 5
-
-# ---------------------------------------------------------------------------
-# 8. 安全与权限
-# ---------------------------------------------------------------------------
-security:
-  # API 密钥加密存储方式: env (环境变量) | vault (HashiCorp Vault) | file (加密文件)
-  secret_backend: "env"
-  # Vault 配置 (secret_backend=vault 时生效)
-  vault:
-    addr: "https://vault.example.com:8200"
-    token_env: "VAULT_TOKEN"
-    mount_path: "secret/hermes-agent"
-  # 命令执行白名单 (正则表达式，空表示全部允许)
-  allowed_commands: []
-  # 网络访问控制
-  network:
-    # 允许访问的域名/IP 范围 (空表示全部允许)
-    allowed_hosts: []
-    # 禁止访问的域名/IP 范围
-    blocked_hosts:
-      - "169.254.0.0/16"
-      - "metadata.google.internal"
-
-# ---------------------------------------------------------------------------
-# 9. 可观测性
-# ---------------------------------------------------------------------------
-observability:
-  # Prometheus 指标暴露端口
-  metrics:
-    enabled: true
-    port: 9090
-    path: "/metrics"
-  # OpenTelemetry 链路追踪
-  tracing:
-    enabled: false
-    exporter: "otlp"                    # otlp | jaeger | zipkin
-    endpoint: "http://localhost:4317"
-  # 健康检查端点
-  health:
-    enabled: true
-    port: 8080
-    path: "/health"
+# ── 环境变量 ──────────────────────────────────────────────
+# 建议将 API Key 等敏感信息放在环境变量或 ~/.hermes/.env 文件中：
+#   DEEPSEEK_API_KEY=sk-xxx
+#   XIAOMI_API_KEY=xxx
+#   DINGTALK_APP_KEY=xxx
+#   DINGTALK_APP_SECRET=xxx

@@ -547,7 +547,7 @@ def main():
     conn.close()
 
     # Start server
-    server = http.server.HTTPServer(("0.0.0.0", PORT), TokenMonitorHandler)
+    server = http.server.HTTPServer(("127.0.0.1", PORT), TokenMonitorHandler)
     print(f"[token_monitor] Dashboard → http://localhost:{PORT}")
     print(f"[token_monitor] API      → http://localhost:{PORT}/api/stats")
     print("[token_monitor] Press Ctrl+C to stop")

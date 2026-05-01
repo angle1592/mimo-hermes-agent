@@ -22,23 +22,23 @@
 pip install hermes-agent
 hermes init
 
-# 配置模型（以 MiMo 为例，换其他模型同理）
-# 编辑 ~/.hermes/config.yaml，参考 config/config.example.yaml
-hermes config set models.main.provider xiaomi
-hermes config set models.main.model mimo-v2.5-pro
+# 配置模型
+# 编辑 ~/.hermes/config.yaml，参考 config/ 目录下的说明
+hermes config set models.main.provider deepseek
+hermes config set models.main.model deepseek-v4-pro
 
 # 启动网关
 hermes gateway start
 ```
 
-完整的配置说明见 [config/config.example.yaml](config/config.example.yaml)（含详细注释）。
+模型接入方式见 [Hermes Agent 官方文档](https://hermes.nousresearch.com/docs)。
 
 ## 当前配置
 
 | 组件 | 选型 | 备注 |
 |------|------|------|
 | 框架 | Hermes Agent | 开源 Agent 框架 |
-| 主模型 | MiMo V2.5-Pro | 小米，通过 OpenAI 兼容接口接入 |
+| 主模型 | MiMo V2.5-Pro | 通过 OpenAI 兼容接口接入 |
 | 辅助模型 | DeepSeek V4 Pro / Flash | 子代理和辅助任务 |
 | 消息平台 | 微信 + 钉钉 | 微信用 itchat-uos，钉钉用 Stream Mode |
 | MCP 工具 | Playwright、SQLite、Sequential Thinking | 浏览器自动化、数据存储、分步推理 |
@@ -46,15 +46,17 @@ hermes gateway start
 
 模型不是固定的。之前用 DeepSeek 做主力，现在换成了 MiMo，以后可能还会变。Hermes 支持任何 OpenAI 兼容的 API，换模型只需改配置。
 
-## 模型切换经验
+## 模型选择经验
 
-不同模型各有特点，没有银弹。以下是我用过的：
+不同模型各有特点，以下是实际使用感受（截至 2026 年 5 月）：
 
-| 模型 | 特点 |
-|------|------|
-| MiMo V2.5-Pro | 推理和代码能力不错，中文理解好 |
-| DeepSeek V4 Pro | 综合能力强，工具调用稳定 |
-| DeepSeek V4 Flash | 速度快，适合子代理和辅助任务 |
+| 模型 | 特点 | 定价参考 |
+|------|------|----------|
+| MiMo V2.5-Pro | 推理和代码能力不错，中文理解好 | [官方定价](https://platform.xiaomimimo.com/static/docs/pricing.md) |
+| DeepSeek V4 Pro | 综合能力强，工具调用稳定 | [官方定价](https://api-docs.deepseek.com/quick_start/pricing) |
+| DeepSeek V4 Flash | 速度快，适合子代理和辅助任务 | 同上 |
+
+定价会变，以官方页面为准，这里不列具体数字。
 
 实际使用中，主模型和辅助模型搭配效果比单一模型好。比如用 MiMo 做主力推理，子代理用 DeepSeek 处理并行任务。
 
@@ -64,7 +66,6 @@ hermes gateway start
 
 - 日均 Token 消耗：1,000~3,000 万（高强度日会更多）
 - 缓存命中率：97% 以上（Hermes 的 context caching 机制）
-- 月成本：十几到二十几块钱（MiMo 定价比较便宜）
 - 在 2C2G 机器上能跑，但复杂任务会比较慢
 
 ## 常用场景
@@ -84,14 +85,13 @@ hermes gateway start
 ```
 ├── README.md
 ├── config/
-│   └── config.example.yaml        # 配置模板（含注释）
+│   └── config.example.yaml        # 配置说明
 ├── docs/
 │   ├── deployment-guide.md        # 部署步骤
 │   └── mimo-integration.md        # MiMo 接入笔记
 ├── scripts/
 │   └── token_monitor.py           # Token 用量监控（Web 面板）
-├── xiao-po-skill.md               # 一个自定义角色 skill 示例
-└── source-patches-skill.md        # 源码修改管理 skill 示例
+└── .gitignore
 ```
 
 ## 已知限制
