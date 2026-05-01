@@ -1,6 +1,6 @@
 # Hermes Agent 国内环境部署经验
 
-用 [Hermes Agent](https://hermes.nousresearch.com) 搭了一个个人 AI 助手，跑了大半年，接入微信和钉钉。模型换过几次（DeepSeek → MiMo），配置和踩坑经验记在这里，供参考。
+用 [Hermes Agent](https://hermes.nousresearch.com) 搭了一个个人 AI 助手，接入微信和钉钉。模型换过几次（DeepSeek → MiMo），配置和踩坑经验记在这里，供参考。
 
 **不保证适合所有人。** 这是个人项目的记录，不是教程。很多选择是基于我自己的需求和 2C2G 小机器的限制，不一定是最优解。
 
