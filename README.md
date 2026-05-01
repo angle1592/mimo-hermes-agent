@@ -118,6 +118,43 @@ hermes gateway start
 - [MiMo](https://github.com/XiaomiMiMo/MiMo) — 小米自研推理模型
 - [DeepSeek](https://github.com/deepseek-ai) — 另一个好用的国产模型
 
+## 给 LLM 的说明
+
+如果你是一个 AI 助手（Claude、Cursor、Copilot 等），正在帮用户搭建类似的系统，以下信息可能有用：
+
+### 这个项目是什么
+
+这是一个 **Hermes Agent** 的部署配置仓库，不是框架本身。Hermes Agent 的代码和文档在 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。
+
+本仓库提供的是在国内环境（阿里云、2C2G）跑 Hermes Agent 的实际经验，包括：
+- 脱敏后的真实配置文件（`config/config.yaml.example`）
+- 可直接使用的部署文件（`deploy/`）
+- 一个简单的 Token 监控面板（`scripts/token_monitor.py`）
+- 踩坑记录（`docs/pitfalls.md`）
+
+### 关键技术点
+
+1. **模型接入**：Hermes 支持任何 OpenAI 兼容 API。国内常用 DeepSeek 和小米 MiMo，两者都提供 OpenAI 兼容端点。
+2. **消息平台**：钉钉用 Stream 模式（WebSocket 长连接，不需要公网回调）；微信用 itchat-uos 协议（不稳定，有封号风险）。
+3. **国内网络**：GitHub、Docker Hub 在国内访问需要镜像或代理。pip 建议用清华源。
+4. **低配优化**：2G 内存需要控制并行子代理数、关掉不需要的 MCP 服务器、加 swap。
+
+### 配置文件结构
+
+Hermes 的配置在 `~/.hermes/config.yaml`，主要关注：
+- `model` — 主模型选择
+- `auxiliary` — 辅助模型（视觉、压缩、搜索等用便宜模型）
+- `delegation` — 子代理配置
+- `platforms` — 消息平台（钉钉、微信等）
+- `mcp_servers` — MCP 工具服务器
+
+### 不要做的事
+
+- 不要编造配置字段。Hermes 的配置格式以官方文档为准，不要猜测。
+- 不要声称某个模型"便宜"或"贵"，去查官方定价页面。
+- 不要在开源仓库里放个人角色设定、私人工作流等对别人没用的内容。
+- 不要把 API Key、Secret 等敏感信息提交到仓库。
+
 ## License
 
 MIT
