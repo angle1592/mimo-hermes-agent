@@ -86,6 +86,28 @@ sed -i 's|\$releasever|9|g' /etc/yum.repos.d/docker-ce.repo
 yum install -y docker-ce docker-ce-cli containerd.io
 ```
 
+## Hermes 大版本更新导致服务器卡死
+
+**症状：** SSH 连不上，磁盘持续大量读写，系统无响应，只能强制重启。
+
+**原因：** 2C2G 机器没有 swap，Hermes 更新时拉取大量 commit（100+），pip 和 npm 同时下载解压依赖包，内存和磁盘 I/O 被打满，系统卡死。
+
+**解决：**
+- **加 swap**（推荐 2GB）：
+  ```bash
+  fallocate -l 2G /swapfile && chmod 600 /swapfile
+  mkswap /swapfile && swapon /swapfile
+  echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+  
+  # 降低 swappiness，平时尽量不用，只在内存紧张时用
+  echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
+  sysctl -p /etc/sysctl.d/99-swap.conf
+  ```
+- 大版本更新建议在能监控的时候手动操作，不要在凌晨自动跑
+- 更新前确认 swap 已启用
+
+**教训：** 低配机器不加 swap 就跑自动更新，等于给自己埋雷。
+
 ## Hermes 更新后自定义修改丢失
 
 **症状：** `pip install --upgrade hermes-agent` 后之前的源码修改没了。

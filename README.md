@@ -44,7 +44,7 @@ hermes gateway start
 | 辅助模型 | DeepSeek V4 Pro / Flash | 子代理和辅助任务 |
 | 消息平台 | 微信 + 钉钉 | 微信用 itchat-uos，钉钉用 Stream Mode |
 | MCP 工具 | Playwright、SQLite、Sequential Thinking | 浏览器自动化、数据存储、分步推理 |
-| 部署 | Alibaba Cloud Linux | 2 vCPU / 2GB RAM |
+| 部署 | Alibaba Cloud Linux | 2 vCPU / 2GB RAM + 2GB swap |
 
 模型不是固定的。之前用 DeepSeek 做主力，现在换成了 MiMo，以后可能还会变。Hermes 支持任何 OpenAI 兼容的 API，换模型只需改配置。
 

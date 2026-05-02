@@ -8,7 +8,7 @@
 - Python 3.10+
 - Nginx（反代用）
 
-> 2G 内存是下限。Hermes 本身占 300-500MB，加上子代理和 MCP 工具会比较紧。建议 4G。
+> 2G 内存是下限。Hermes 本身占 300-500MB，加上子代理和 MCP 工具会比较紧。**强烈建议加 2GB swap 作为缓冲**，详见 [踩坑记录](pitfalls.md)。
 
 ## 安装 Hermes Agent
 
