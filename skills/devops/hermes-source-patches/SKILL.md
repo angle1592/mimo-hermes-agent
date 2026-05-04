@@ -27,6 +27,7 @@ tags: [hermes, patches, source-modification]
 | `gateway/platforms/weixin.py` | references/weixin-markdown-passthrough.patch | 微信 Markdown 原样透传（WeChat 已原生支持 MD 渲染） |
 | `tools/delegate_tool.py` | references/delegate-tool.patch | 子代理模型 debug 日志 |
 | `tools/xiaomi_tts_tool.py` | references/xiaomi_tts_tool.py.bak | 小米 TTS 自定义工具（新文件） |
+| `run_agent.py` | references/compression-context-provider-bug.md | 压缩模型上下文误用主模型 provider（v0.12.0 bug，config workaround） |
 
 ## 更新前分析流程
 

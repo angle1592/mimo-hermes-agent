@@ -133,18 +133,21 @@ chmod 600 ~/.git-credentials
 git config --global credential.helper store
 ```
 
-**Important:** The credential URL must use `github.com` (not the mirror hostname) because `git-credentials` matches on the **rewritten** URL. The `insteadOf` rewrites `github.com` → `githubfast.com`, but git looks up credentials for the rewritten host. If push still prompts for credentials, try storing for both:
+**Important:** The credential URL must use `github.com` (not the mirror hostname) because `git-credentials` matches on the **original** URL before `insteadOf` rewriting. But in practice, git sometimes looks up the rewritten host too. Store credentials for BOTH to be safe:
 
 ```bash
+echo "https://USERNAME:PAT@github.com" > ~/.git-credentials
 echo "https://USERNAME:PAT@githubfast.com" >> ~/.git-credentials
+git config --global credential.helper store
+chmod 600 ~/.git-credentials
 ```
 
 **Verify push works:**
 
 ```bash
 cd /path/to/your/repo
-git remote -v   # should show github.com URLs (rewritten transparently)
-git push origin main 2>&1 | head -5
+git remote set-url origin https://github.com/owner/repo.git  # clean URL
+git push --dry-run origin main 2>&1 | head -5
 ```
 
 **Security:** After configuring, strip any embedded PAT from remote URLs:

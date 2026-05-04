@@ -89,14 +89,14 @@ bedrock:
 auxiliary:
   vision:
     provider: sensenova
-    model: deepseek-v4-flash
+    model: sensenova-6.7-flash-lite
     base_url: ''
     api_key: ""
     timeout: 120
     extra_body: {}
     download_timeout: 30
   web_extract:
-    provider: sensenova
+    provider: deepseek
     model: deepseek-v4-flash
     base_url: ''
     api_key: ""
@@ -107,10 +107,13 @@ auxiliary:
     model: deepseek-v4-pro
     base_url: ''
     api_key: ""
+    # 显式指定上下文长度，避免自动检测误取 OpenRouter 免费档的 131K
+    # 换模型时记得同步修改或删除此行
+    context_length: 1000000
     timeout: 120
     extra_body: {}
   session_search:
-    provider: sensenova
+    provider: deepseek
     model: deepseek-v4-flash
     base_url: ''
     api_key: ""
@@ -118,28 +121,28 @@ auxiliary:
     extra_body: {}
     max_concurrency: 3
   skills_hub:
-    provider: sensenova
+    provider: deepseek
     model: deepseek-v4-flash
     base_url: ''
     api_key: ""
     timeout: 30
     extra_body: {}
   approval:
-    provider: sensenova
+    provider: deepseek
     model: deepseek-v4-flash
     base_url: ''
     api_key: ""
     timeout: 30
     extra_body: {}
   mcp:
-    provider: sensenova
+    provider: deepseek
     model: deepseek-v4-flash
     base_url: ''
     api_key: ""
     timeout: 30
     extra_body: {}
   title_generation:
-    provider: sensenova
+    provider: deepseek
     model: deepseek-v4-flash
     base_url: ''
     api_key: ""

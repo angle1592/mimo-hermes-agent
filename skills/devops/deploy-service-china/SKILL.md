@@ -10,6 +10,7 @@ metadata:
     related_skills: [china-github-mirror, hermes-agent]
     related_files:
       - references/sensenova-provider.md
+      - references/repo-sync.md
 ---
 
 # Deploy Services in China (Alibaba Cloud Linux)
@@ -380,4 +381,4 @@ When the home directory accumulates test files, scraped HTML, old scripts, and c
 
 ## Automated Repo Sync
 
-Keep a GitHub repo in sync with local Hermes config and custom skills. See `references/repo-sync.md` for the full pattern (whitelist, sanitization, cron setup, mirror credentials).
+Keep a GitHub repo in sync with local Hermes config and custom skills. Includes mandatory two-pass sanitization (field-level + regex catch-all) to prevent privacy leaks. See `references/repo-sync.md` for the full pattern (whitelist, sanitization, cron setup, mirror credentials).

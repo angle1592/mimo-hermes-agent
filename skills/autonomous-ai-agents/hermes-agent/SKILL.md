@@ -743,12 +743,38 @@ Common gateway problems:
 - **Slack bot only works in DMs**: Must subscribe to `message.channels` event. Without it, the bot ignores public channels.
 - **Windows HTTP 400 "No models provided"**: Config file encoding issue (BOM). Ensure `config.yaml` is saved as UTF-8 without BOM.
 
+### Pitfall: Investigate before patching config
+
+When Hermes reports a wrong value (e.g., incorrect context length, wrong model detection), **investigate the actual resolution chain first** before adding config overrides. The correct fix may be a one-line config change, but you need to understand *why* the auto-detection failed to pick the right fix.
+
+Pattern for context length issues:
+```python
+cd /usr/local/lib/hermes-agent && python3 -c "
+import sys; sys.path.insert(0, '.')
+from agent.model_metadata import get_model_context_length
+# Test with the ACTUAL parameters the code uses
+print(get_model_context_length('model-name', base_url='...', provider='ACTUAL_PROVIDER'))
+# Compare with what it SHOULD be
+print(get_model_context_length('model-name', base_url='...', provider='CORRECT_PROVIDER'))
+"
+```
+
+Check the `get_model_context_length` resolution chain in `agent/model_metadata.py` (line ~1229): config override → cache → endpoint probe → models_dev → OpenRouter → hardcoded defaults → fallback. Identify which step returns the wrong value and why.
+
 ### Auxiliary models not working
 If `auxiliary` tasks (vision, compression, session_search) fail silently, the `auto` provider can't find a backend. Either set `OPENROUTER_API_KEY` or `GOOGLE_API_KEY`, or explicitly configure each auxiliary task's provider:
 ```bash
 hermes config set auxiliary.vision.provider <your_provider>
 hermes config set auxiliary.vision.model <model_name>
 ```
+
+**Compression model context mismatch (v0.12.0 bug):** If the compression model's provider differs from the main model's provider, `get_model_context_length()` receives the wrong provider and may resolve a wildly incorrect context window (e.g., 131K instead of 1M for deepseek-v4-pro when main model uses xiaomi). Workaround — add explicit `context_length` to config:
+```yaml
+auxiliary:
+  compression:
+    context_length: 1000000   # override buggy auto-detection
+```
+Details: see `hermes-source-patches` skill → `references/compression-context-provider-bug.md`.
 
 ### Web login / authentication issues
 

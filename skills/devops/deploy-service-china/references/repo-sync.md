@@ -1,82 +1,93 @@
-# Automated Repo Sync: Local Hermes Config → GitHub
+# GitHub Repo Auto-Sync Pattern
 
-Pattern for keeping a GitHub repo in sync with local `~/.hermes/` configuration and custom skills. Inspired by the "洁癖.skill" concept — persistent documentation that survives session resets.
+Automatically sync Hermes Agent config, skills, and docs to a GitHub repo as a persistent knowledge base.
 
-## What to Sync
+## Architecture
 
-| Source | Destination | Sanitization |
-|--------|-------------|-------------|
-| `~/.hermes/config.yaml` | `config/config.yaml.example` | Strip `api_key`, `client_secret`, `record_key` values |
-| Custom skills (whitelist) | `skills/<category>/<name>/` | None (skills don't contain secrets) |
-| `~/.hermes/token_monitor/server.py` | `scripts/token_monitor.py` | None |
-| `~/.hermes/SOUL.md` | `docs/SOUL.md` | None |
-| `~/.hermes/cron/jobs.json` | `docs/cron-jobs.md` | Truncate prompts, auto-generate markdown table |
+```
+~/.hermes/ (source)  →  sync.sh  →  ~/mimo-hermes-agent/ (git repo)  →  GitHub
+```
 
-## What NOT to Sync
-
-- `.env` — API keys, secrets
-- `auth.json` — authentication tokens
-- `sessions/`, `cache/`, `state.db` — runtime state
-- `logs/` — transient
-- System-provided skills (hundreds of files, not user-created)
-
-## Custom Skill Whitelist
-
-Don't sync everything — system skills (comfyui, powerpoint, etc.) are huge and not user-created. Maintain an explicit whitelist in the sync script:
+## Sync Script Template
 
 ```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="/root/mimo-hermes-agent"  # HARDCODE, don't use relative paths
+HERMES_DIR="${HERMES_DIR:-$HOME/.hermes}"
+
+# Whitelist of custom skills (don't sync all system skills)
 CUSTOM_SKILLS=(
     "xiao-po"
     "hermes-token-monitor"
-    "yuanbao"
-    "dogfood"
     "research/wechat-article-reader"
-    "devops/hermes-source-patches"
-    "devops/china-github-mirror"
-    "devops/deploy-service-china"
-    "gateway/weixin-setup"
-    "gateway/hermes-dingtalk-setup"
-    "software-development/import-external-skill"
-    "autonomous-ai-agents/hermes-agent"
+    # ... add your custom skills
 )
+
+# Sanitize a single file
+sanitize_file() {
+    local file="$1"
+    sed -i -E \
+        -e 's/cid[A-Za-z0-9+/=]{10,}/REDACTED_CHAT_ID/g' \
+        -e 's/47\.119\.146\.[0-9]+/YOUR_SERVER_IP/g' \
+        -e 's/ghp_[A-Za-z0-9]+/REDACTED_PAT/g' \
+        -e 's/sk-[A-Za-z0-9]{20,}/REDACTED_KEY/g' \
+        -e 's/(chat_id:\s*).*/\1REDACTED/' \
+        -e 's/(app_key:\s*).*/\1REDACTED/' \
+        -e 's/(app_secret:\s*).*/\1REDACTED/' \
+        -e 's/(api_key:\s*).*/\1""/' \
+        -e 's/(client_secret:\s*).*/\1REDACTED/' \
+        "$file"
+}
+
+# Global scan AFTER sync (catches leaks in skill examples, docs, etc.)
+sanitize_all() {
+    while IFS= read -r -d "" file; do
+        if grep -qE 'cid[A-Za-z0-9+/=]{10,}|ghp_[A-Za-z0-9]+|sk-[A-Za-z0-9]{20,}' "$file" 2>/dev/null; then
+            sanitize_file "$file"
+        fi
+    done < <(find "$REPO_DIR" -type f \( -name "*.md" -o -name "*.yaml" -o -name "*.py" -o -name "*.sh" \) -print0)
+}
 ```
 
-Update this list when new custom skills are created.
+## What to Sync
 
-## Config Sanitization
+| Content | Source | Destination |
+|---------|--------|-------------|
+| Config (sanitized) | `~/.hermes/config.yaml` | `config/config.yaml.example` |
+| Custom skills | `~/.hermes/skills/<whitelist>` | `skills/` |
+| Token monitor | `~/.hermes/token_monitor/server.py` | `scripts/` |
+| SOUL.md | `~/.hermes/SOUL.md` | `docs/` |
+| Cron jobs overview | `~/.hermes/cron/jobs.json` | `docs/cron-jobs.md` |
+
+## What NOT to Sync
+
+- `.env` (API keys)
+- `auth.json` (auth tokens)
+- Session data, caches, databases, logs
+- System-provided skills (huge, not customized)
+
+## Git Mirror Setup (China servers)
 
 ```bash
-sed -E \
-    -e 's/(api_key:\s*).+/\1""/' \
-    -e 's/(client_secret:\s*).+/\1"REDACTED"/' \
-    -e 's/(record_key:\s*).+/\1"FILL_IN"/' \
-    "$src" > "$dst"
+# insteadOf rewrites github.com → mirror transparently
+git config --global url."https://githubfast.com/".insteadOf "https://github.com/"
+
+# Credentials for BOTH hosts (git looks up rewritten host)
+echo "https://USER:TOKEN@github.com" > ~/.git-credentials
+echo "https://USER:TOKEN@githubfast.com" >> ~/.git-credentials
+git config --global credential.helper store
+chmod 600 ~/.git-credentials
+
+# Remote uses clean github.com URL (rewritten by insteadOf)
+git remote set-url origin https://github.com/owner/repo.git
 ```
 
-Always review the diff before first push to ensure no secrets leaked.
+## Pitfalls
 
-## Git Push via Mirror (China)
-
-On servers using `git config --global url."https://githubfast.com/".insteadOf "https://github.com/"`:
-
-1. Remote URL should use `github.com` (insteadOf rewrites transparently)
-2. Credentials in `~/.git-credentials` need entries for **both** `github.com` AND the mirror host (`githubfast.com`), because git looks up credentials for the rewritten URL
-3. Test with `git push --dry-run origin main` before enabling cron
-
-## Cron Schedule
-
-Every 6 hours is a good default — frequent enough to catch changes, not so frequent it wastes resources:
-
-```
-0 */6 * * *
-```
-
-The sync script should be idempotent (safe to run multiple times). If no changes, skip commit.
-
-## Script Location
-
-Store at `~/.hermes/scripts/repo-sync.sh` (long-term scripts directory). The script should:
-- Use a hardcoded `REPO_DIR` (not relative to script location, which may change)
-- Pull latest before syncing (to avoid conflicts)
-- Only commit+push if there are actual changes
-- Log with timestamps for debugging
+- **REPO_DIR must be hardcoded** — if script lives at `~/.hermes/scripts/sync.sh`, `$(dirname "$0")/..` points to `~/.hermes/`, NOT the repo. Use absolute path.
+- **sed escaping is fragile in dynamically generated scripts** — Python writing shell scripts with sed -E and regex has terrible escaping. Safer to `cp` file first, then `sed -i` in place.
+- **Privacy leaks hide in skill example files** — DingTalk chat IDs in example `--deliver` flags, server IPs in deployment docs. ALWAYS run global scan after sync, don't just sanitize config.
+- **git push --dry-run first** — verify credentials work before setting up cron.
+- **Cron job cwd may be deleted** — if a cron job's working directory gets removed, subsequent terminal calls fail with `FileNotFoundError: No such file or directory`. Terminal sessions inherit CWD, so once it's deleted, ALL terminal calls fail (including `read_file` in some contexts). **Workaround:** use `execute_code` with `os.chdir('/root')` or use `workdir` parameter. If that also fails, the session CWD is permanently stuck — inform user and switch to a fresh execution context.

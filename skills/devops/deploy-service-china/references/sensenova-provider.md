@@ -41,14 +41,35 @@ providers:
     name: SenseNova
 ```
 
-### Usage as auxiliary provider
+### Usage as auxiliary provider (DEPRECATED for DeepSeek models — see Quality Assessment)
 ```yaml
+# DON'T: SenseNova's DeepSeek quality is worse than official
+auxiliary:
+  vision:
+    provider: sensenova        # ❌ lower quality
+    model: deepseek-v4-flash
+
+# DO: Use official DeepSeek for DeepSeek models
+auxiliary:
+  vision:
+    provider: deepseek         # ✅ official API
+    model: deepseek-v4-flash
+
+# SenseNova is still fine for its own proprietary models:
 auxiliary:
   vision:
     provider: sensenova
-    model: deepseek-v4-flash
-  # ... same for web_extract, session_search, etc.
+    model: sensenova-6.7-flash-lite  # ✅ SenseNova's own model
 ```
+
+## Quality Assessment (2026-05)
+
+**SenseNova's hosted DeepSeek models have noticeably lower quality than official DeepSeek API.** After extended use, user concluded the output quality is unacceptable for auxiliary tasks (vision, web extraction, session search, etc.) and switched all auxiliary providers back to official DeepSeek. SenseNova's free tier is still useful for the proprietary `sensenova-6.7-flash-lite` model, but don't use it as a DeepSeek proxy for quality-sensitive work.
+
+Current config state (post-switch):
+- Main model: `xiaomi/mimo-v2.5-pro` (unchanged)
+- Auxiliary: `deepseek/deepseek-v4-flash` (official API, was `sensenova/deepseek-v4-flash`)
+- Compression: `deepseek/deepseek-v4-pro` (was already official)
 
 ## Pitfalls
 
