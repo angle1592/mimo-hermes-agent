@@ -1,562 +1,920 @@
 #!/usr/bin/env python3
-"""
-Token Usage Monitor — Real-time dashboard for AI token consumption and costs.
-Reads from a SQLite database (state.db) or generates simulated data.
-Serves an auto-refreshing HTML page on http://localhost:8080.
-Uses only Python stdlib: http.server, sqlite3, json. No external deps.
-"""
+"""Token 监控服务 - 实时展示 Hermes Agent 的 Token 用量"""
 
 import http.server
 import json
-import os
-import random
 import sqlite3
-from datetime import datetime, timedelta
+import os
+import time
+from datetime import datetime
+from urllib.parse import urlparse, parse_qs
 
-# ── Configuration ──────────────────────────────────────────────────────────
+DB_PATH = os.path.expanduser("~/.hermes/state.db")
+PORT = 8765
+HOST = "127.0.0.1"  # 通过 nginx 代理，绑定本地即可
 
-DB_PATH = os.environ.get("TOKEN_MONITOR_DB", "state.db")
-PORT = int(os.environ.get("TOKEN_MONITOR_PORT", 8080))
-REFRESH_SECONDS = 10
-SIMULATE = os.environ.get("TOKEN_MONITOR_SIMULATE", "1") == "1"  # default: simulate if no real DB
+# 人民币汇率（CNY per USD）
+USD_TO_CNY = 6.85
 
-# Pricing per 1K tokens (in ¥)
+# DeepSeek 官方定价 - 每百万 Token (USD)
+# 来源: https://api-docs.deepseek.com/quick_start/pricing
 PRICING = {
-    "mimo-v2.5-pro":     {"provider": "xiaomi",  "input": 0.001, "output": 0.005},
-    "deepseek-v4-pro":   {"provider": "deepseek","input": 0.002, "output": 0.008},
-    "deepseek-v4-flash": {"provider": "deepseek","input": 0.0005,"output": 0.002},
+    "deepseek-v4-flash": {
+        "input_cache_hit": 0.0028,
+        "input_cache_miss": 0.14,
+        "output": 0.28,
+    },
+    "deepseek-v4-pro": {
+        # 75% 折扣至 2026/05/31 15:59 UTC
+        "input_cache_hit": 0.003625,
+        "input_cache_miss": 0.435,
+        "output": 0.87,
+        "discount": True,
+        "discount_pct": 75,
+        "discount_until": "2026-05-31",
+        "original_input_cache_hit": 0.0145,
+        "original_input_cache_miss": 1.74,
+        "original_output": 3.48,
+    },
+    "deepseek-chat": {  # 旧名称 → deepseek-v4-flash
+        "input_cache_hit": 0.0028,
+        "input_cache_miss": 0.14,
+        "output": 0.28,
+        "display_name": "deepseek-v4-flash",
+    },
+    "deepseek-reasoner": {  # 旧名称 → deepseek-v4-flash thinking
+        "input_cache_hit": 0.0028,
+        "input_cache_miss": 0.14,
+        "output": 0.28,
+        "display_name": "deepseek-v4-flash",
+    },
+    # Xiaomi MiMo 定价 (海外 USD，input ≤ 256K)
+    # 来源: https://platform.xiaomimimo.com/docs/en-US/pricing
+    "mimo-v2.5-pro": {
+        "input_cache_hit": 0.20,
+        "input_cache_miss": 1.00,
+        "output": 3.00,
+        "vendor": "Xiaomi",
+    },
+    "mimo-v2-pro": {
+        "input_cache_hit": 0.20,
+        "input_cache_miss": 1.00,
+        "output": 3.00,
+        "display_name": "mimo-v2.5-pro",
+        "vendor": "Xiaomi",
+    },
+    "xiaomi/mimo-v2.5": {
+        "input_cache_hit": 0.08,
+        "input_cache_miss": 0.40,
+        "output": 2.00,
+        "display_name": "mimo-v2.5",
+        "vendor": "Xiaomi",
+    },
+    "mimo-v2.5": {
+        "input_cache_hit": 0.08,
+        "input_cache_miss": 0.40,
+        "output": 2.00,
+        "vendor": "Xiaomi",
+    },
+    "mimo-v2-flash": {
+        "input_cache_hit": 0.01,
+        "input_cache_miss": 0.10,
+        "output": 0.30,
+        "vendor": "Xiaomi",
+    },
 }
 
-# ── Database ────────────────────────────────────────────────────────────────
+DEFAULT_PRICING = {
+    "input_cache_hit": 0.0,
+    "input_cache_miss": 0.0,
+    "output": 0.0,
+}
 
-def init_db():
-    """Create or migrate the messages table. Returns an open connection."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id   TEXT,
-            role         TEXT,
-            content      TEXT,
-            model        TEXT,
-            provider     TEXT,
-            tokens_in    INTEGER DEFAULT 0,
-            tokens_out   INTEGER DEFAULT 0,
-            timestamp    TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_model ON messages(model)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp)")
-    conn.commit()
-    return conn
+# 当数据库中出现未知模型时使用的兜底定价（按照 deepseek-v4-flash 价格估算）
+UNKNOWN_MODEL_PRICING = {
+    "input_cache_hit": 0.0028,
+    "input_cache_miss": 0.14,
+    "output": 0.28,
+}
 
 
-def seed_simulated_data(conn, hours=72):
-    """Populate the database with realistic-looking synthetic data."""
-    # Check if we already have data
-    cur = conn.execute("SELECT COUNT(*) FROM messages")
-    count = cur.fetchone()[0]
-    if count > 0:
-        return  # already populated
-
-    models = list(PRICING.keys())
-    roles = ["user", "assistant", "system", "tool"]
-    sessions = [f"sess-{i:04x}" for i in range(1, 8)]
-
-    now = datetime.utcnow()
-    rows = []
-
-    for i in range(500):
-        ts = now - timedelta(
-            hours=random.uniform(0, hours),
-            minutes=random.uniform(0, 59),
-            seconds=random.uniform(0, 59),
-        )
-        model = random.choices(models, weights=[0.25, 0.45, 0.30])[0]
-        provider = PRICING[model]["provider"]
-        role = "assistant" if random.random() < 0.55 else random.choice(roles)
-        tokens_in = random.randint(80, 8000)
-        tokens_out = random.randint(40, 6000)
-        session_id = random.choice(sessions)
-
-        rows.append((
-            session_id, role,
-            f"[Simulated] {role} message for {model}",
-            model, provider, tokens_in, tokens_out,
-            ts.strftime("%Y-%m-%d %H:%M:%S"),
-        ))
-
-    conn.executemany(
-        "INSERT INTO messages(session_id, role, content, model, provider, tokens_in, tokens_out, timestamp) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        rows,
+def calc_cost(model, input_tokens, output_tokens, cache_read_tokens=0):
+    """根据模型定价计算费用（返回 USD）"""
+    # 标准化模型名
+    normalized = model
+    if model in ("deepseek-chat", "deepseek-reasoner"):
+        normalized = "deepseek-v4-flash"
+    elif model in ("mimo-v2-pro",):
+        normalized = "mimo-v2.5-pro"
+    elif model in ("xiaomi/mimo-v2.5",):
+        normalized = "mimo-v2.5"
+    p = PRICING.get(normalized, UNKNOWN_MODEL_PRICING)
+    cache_hit = cache_read_tokens or 0
+    cache_miss = input_tokens or 0
+    cost = (
+        cache_hit / 1_000_000 * p["input_cache_hit"] +
+        cache_miss / 1_000_000 * p["input_cache_miss"] +
+        (output_tokens or 0) / 1_000_000 * p["output"]
     )
-    conn.commit()
-    print(f"[token_monitor] Seeded {len(rows)} simulated messages into {DB_PATH}")
-
-
-def query_stats(conn):
-    """Query aggregated token/cost stats from the database."""
-    cur = conn.execute("""
-        SELECT
-            model,
-            provider,
-            SUM(tokens_in)  AS total_in,
-            SUM(tokens_out) AS total_out,
-            COUNT(*)        AS calls
-        FROM messages
-        GROUP BY model, provider
-        ORDER BY provider, model
-    """)
-    rows = cur.fetchall()
-
-    models_stats = []
-    provider_totals = {}  # provider -> {"calls": N, "cost": ¥}
-    grand_cost = 0.0
-
-    for r in rows:
-        model = r["model"]
-        provider = r["provider"]
-        tokens_in = r["total_in"] or 0
-        tokens_out = r["total_out"] or 0
-        calls = r["calls"] or 0
-
-        price = PRICING.get(model, {"input": 0, "output": 0, "provider": provider})
-        cost_in = (tokens_in / 1000) * price["input"]
-        cost_out = (tokens_out / 1000) * price["output"]
-        cost_total = cost_in + cost_out
-
-        models_stats.append({
-            "model": model,
-            "provider": provider,
-            "tokens_in": tokens_in,
-            "tokens_out": tokens_out,
-            "calls": calls,
-            "cost_in": round(cost_in, 4),
-            "cost_out": round(cost_out, 4),
-            "cost_total": round(cost_total, 4),
-        })
-
-        if provider not in provider_totals:
-            provider_totals[provider] = {"calls": 0, "cost": 0.0}
-        provider_totals[provider]["calls"] += calls
-        provider_totals[provider]["cost"] += cost_total
-        grand_cost += cost_total
-
-    # Recent activity (last 24h)
-    cur = conn.execute("""
-        SELECT
-            model,
-            provider,
-            SUM(tokens_in)  AS total_in,
-            SUM(tokens_out) AS total_out,
-            COUNT(*)        AS calls
-        FROM messages
-        WHERE timestamp >= datetime('now', '-24 hours')
-        GROUP BY model, provider
-        ORDER BY provider, model
-    """)
-    recent_rows = cur.fetchall()
-
-    recent_models = []
-    for r in recent_rows:
-        model = r["model"]
-        provider = r["provider"]
-        price = PRICING.get(model, {"input": 0, "output": 0, "provider": provider})
-        cost_total = ((r["total_in"] or 0) / 1000) * price["input"] + \
-                     ((r["total_out"] or 0) / 1000) * price["output"]
-        recent_models.append({
-            "model": model,
-            "provider": provider,
-            "tokens_in": r["total_in"] or 0,
-            "tokens_out": r["total_out"] or 0,
-            "calls": r["calls"] or 0,
-            "cost_total": round(cost_total, 4),
-        })
-
     return {
-        "models": models_stats,
-        "providers": {k: {"name": k, "calls": v["calls"], "cost": round(v["cost"], 4)}
-                      for k, v in provider_totals.items()},
-        "grand_cost": round(grand_cost, 4),
-        "total_models": len(models_stats),
-        "recent_24h": recent_models,
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "cost": round(cost, 6),
+        "cost_cny": round(cost * USD_TO_CNY, 6),
+        "cache_hit_tokens": cache_hit,
+        "cache_miss_tokens": cache_miss,
+        "output_tokens": output_tokens or 0,
+        "has_discount": p.get("discount", False),
+        "discount_pct": p.get("discount_pct", 0),
+        "display_name": p.get("display_name", model),
     }
 
 
-# ── HTML Rendering ──────────────────────────────────────────────────────────
-
-CSS = """
-:root {
-    --bg: #0d1117;
-    --card: #161b22;
-    --border: #30363d;
-    --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --orange: #d29922;
-    --purple: #a371f7;
-    --red: #f85149;
-    --deepseek: #58a6ff;
-    --xiaomi: #ff6a00;
-}
-* { margin:0; padding:0; box-sizing:border-box; }
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.6;
-    min-height: 100vh;
-}
-header {
-    background: var(--card); border-bottom: 1px solid var(--border);
-    padding: 20px 32px; display:flex; justify-content:space-between; align-items:center;
-    position: sticky; top:0; z-index:10;
-}
-header h1 { font-size: 1.5rem; font-weight: 600; }
-header h1 span { color: var(--accent); }
-header .badge {
-    font-size: 0.8rem; padding: 4px 12px; border-radius: 20px;
-    background: rgba(88,166,255,0.12); color: var(--accent);
-    border: 1px solid rgba(88,166,255,0.3);
-}
-.container { max-width: 1100px; margin: 0 auto; padding: 28px 32px; }
-
-/* Cards */
-.cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-bottom:28px; }
-.card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px; transition: transform 0.15s, box-shadow 0.15s;
-}
-.card:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
-.card .label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom:6px; }
-.card .value { font-size: 1.8rem; font-weight: 700; }
-.card .sub { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
-.card.xiaomi  .value { color: var(--xiaomi); }
-.card.deepseek .value { color: var(--deepseek); }
-.card.accent .value { color: var(--accent); }
-
-/* Section headings */
-h2 {
-    font-size: 1.15rem; font-weight: 600; margin-bottom: 16px;
-    display: flex; align-items: center; gap: 8px;
-}
-h2::after { content:''; flex:1; height:1px; background: var(--border); }
-
-/* Model table */
-.table-wrap { overflow-x: auto; margin-bottom: 28px; }
-table {
-    width: 100%; border-collapse: collapse; font-size: 0.9rem;
-    background: var(--card); border-radius: 12px; overflow: hidden;
-    border: 1px solid var(--border);
-}
-th, td { padding: 12px 16px; text-align: left; white-space: nowrap; }
-th { background: rgba(48,54,61,0.6); color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-td { border-top: 1px solid var(--border); }
-tr:hover td { background: rgba(88,166,255,0.04); }
-.provider-tag {
-    display: inline-block; font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
-    font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em;
-}
-.provider-tag.deepseek { background: rgba(88,166,255,0.15); color: var(--deepseek); }
-.provider-tag.xiaomi   { background: rgba(255,106,0,0.15);  color: var(--xiaomi); }
-.num { font-variant-numeric: tabular-nums; text-align: right; }
-
-/* Bar charts */
-.bar-cell { min-width: 180px; }
-.bar-row { display:flex; align-items:center; gap:8px; margin: 3px 0; }
-.bar-row .bar-label { font-size:0.7rem; color:var(--muted); width:50px; text-align:right; flex-shrink:0; }
-.bar-bg { flex:1; height:10px; border-radius:5px; background: rgba(48,54,61,0.6); overflow:hidden; }
-.bar-fill { height:100%; border-radius:5px; transition: width 0.5s ease; }
-.bar-fill.in  { background: linear-gradient(90deg, #58a6ff, #79c0ff); }
-.bar-fill.out { background: linear-gradient(90deg, #a371f7, #c2a0fa); }
-.bar-row .bar-val { font-size:0.7rem; color:var(--text); width:55px; text-align:left; flex-shrink:0; }
-
-/* Cost breakdown bars */
-.cost-bar { margin-bottom: 12px; }
-.cost-bar .cost-label { display:flex; justify-content:space-between; margin-bottom: 4px; font-size: 0.85rem; }
-.cost-bar .cost-bg { height: 20px; border-radius: 6px; background: rgba(48,54,61,0.6); overflow: hidden; display: flex; }
-.cost-bar .cost-fill {
-    height: 100%; border-radius: 6px; display: flex; align-items: center;
-    justify-content: center; font-size: 0.7rem; font-weight: 600; color: #fff;
-    transition: width 0.5s ease; min-width: 2px;
-}
-.cost-fill.xiaomi  { background: linear-gradient(90deg, #d24900, #ff6a00); }
-.cost-fill.deepseek { background: linear-gradient(90deg, #1f6feb, #58a6ff); }
-
-/* Recent activity mini-bars */
-.recent-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.82rem; }
-.recent-row:last-child { border-bottom:none; }
-.recent-row .r-model { flex:1; min-width:130px; }
-.recent-row .r-tokens { color: var(--muted); font-size:0.75rem; margin-right:8px; }
-.recent-row .r-cost { font-weight:600; min-width:70px; text-align:right; }
-.recent-row .mini-bar { flex:1; height:6px; border-radius:3px; background:rgba(48,54,61,0.6); overflow:hidden; }
-.recent-row .mini-fill { height:100%; border-radius:3px; }
-.mini-fill.deepseek { background: var(--deepseek); }
-.mini-fill.xiaomi   { background: var(--xiaomi); }
-
-footer {
-    text-align: center; color: var(--muted); font-size: 0.75rem;
-    padding: 24px 32px; border-top: 1px solid var(--border); margin-top: 20px;
-}
-footer .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--green); margin-right:6px; animation:pulse 1.5s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-"""
-
-
-def fmt_tokens(n):
-    """Human-readable token count."""
-    if n >= 1_000_000:
-        return f"{n/1_000_000:.1f}M"
-    elif n >= 1_000:
-        return f"{n/1_000:.1f}K"
-    return str(n)
-
-
-def fmt_cost(n):
-    """Format cost in ¥ with appropriate precision."""
-    if abs(n) < 0.01:
-        return f"¥{n:.4f}"
-    return f"¥{n:.2f}"
-
-
-def render_bar_chart(tokens_in, tokens_out, max_val):
-    """Render an inline bar chart row for a model (CSS bars)."""
-    ratio_in = (tokens_in / max_val * 100) if max_val > 0 else 0
-    ratio_out = (tokens_out / max_val * 100) if max_val > 0 else 0
-    return f"""
-    <div class="bar-cell">
-      <div class="bar-row">
-        <span class="bar-label">In</span>
-        <div class="bar-bg"><div class="bar-fill in" style="width:{ratio_in:.1f}%"></div></div>
-        <span class="bar-val">{fmt_tokens(tokens_in)}</span>
-      </div>
-      <div class="bar-row">
-        <span class="bar-label">Out</span>
-        <div class="bar-bg"><div class="bar-fill out" style="width:{ratio_out:.1f}%"></div></div>
-        <span class="bar-val">{fmt_tokens(tokens_out)}</span>
-      </div>
-    </div>"""
-
-
-def build_html(stats):
-    """Assemble the full HTML dashboard."""
-    models = stats["models"]
-    providers = stats["providers"]
-    recent = stats["recent_24h"]
-    grand_cost = stats["grand_cost"]
-    ts = stats["timestamp"]
-
-    # Find max token count for scaling bars
-    all_tokens = [m["tokens_in"] + m["tokens_out"] for m in models]
-    max_tok = max(all_tokens) if all_tokens else 1
-
-    # Find max cost for scaling provider bars
-    provider_costs = [p["cost"] for p in providers.values()]
-    max_pcost = max(provider_costs) if provider_costs else 1
-
-    # Find max recent cost for mini bars
-    max_rcost = max((r["cost_total"] for r in recent), default=1)
-
-    # Build model table rows
-    model_rows = []
-    for m in models:
-        model_rows.append(f"""
-        <tr>
-          <td><strong>{m["model"]}</strong></td>
-          <td><span class="provider-tag {m['provider']}">{m["provider"]}</span></td>
-          <td class="num">{m["calls"]}</td>
-          <td>{render_bar_chart(m["tokens_in"], m["tokens_out"], max_tok)}</td>
-          <td class="num" style="color:var(--accent)">{fmt_cost(m["cost_total"])}</td>
-        </tr>""")
-
-    # Build provider cost bars
-    cost_bars = []
-    for _, p in providers.items():
-        pct = (p["cost"] / max_pcost * 100) if max_pcost > 0 else 0
-        cost_bars.append(f"""
-        <div class="cost-bar">
-          <div class="cost-label">
-            <span><span class="provider-tag {p['name']}" style="font-size:0.75rem">{p['name']}</span> {p['calls']} calls</span>
-            <strong>{fmt_cost(p['cost'])}</strong>
-          </div>
-          <div class="cost-bg">
-            <div class="cost-fill {p['name']}" style="width:{pct:.1f}%">{fmt_cost(p['cost'])}</div>
-          </div>
-        </div>""")
-
-    # Recent 24h rows
-    recent_rows = []
-    for r in recent:
-        rpct = (r["cost_total"] / max_rcost * 100) if max_rcost > 0 else 0
-        recent_rows.append(f"""
-        <div class="recent-row">
-          <span class="r-model">{r["model"]}</span>
-          <span class="r-tokens">{fmt_tokens(r["tokens_in"] + r["tokens_out"])} tokens</span>
-          <div class="mini-bar">
-            <div class="mini-fill {r['provider']}" style="width:{rpct:.1f}%"></div>
-          </div>
-          <span class="r-cost">{fmt_cost(r["cost_total"])}</span>
-        </div>""")
-
-    xiaomi_cost = providers.get("xiaomi", {}).get("cost", 0)
-    deepseek_cost = providers.get("deepseek", {}).get("cost", 0)
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
+HTML_PAGE = r'''
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="{REFRESH_SECONDS}">
-  <title>Token Monitor — AI Usage Dashboard</title>
-  <style>{CSS}</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>💰 小珀 Token 监控</title>
+<style>
+  :root {
+    --bg: #faf5ff;
+    --card-bg: #ffffff;
+    --text: #4a3670;
+    --text-muted: #8b7fa8;
+    --accent: #c084fc;
+    --accent2: #e879f9;
+    --accent3: #a78bfa;
+    --border: #e9d5ff;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --radius: 16px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  .header {
+    text-align: center;
+    padding: 30px 0 20px;
+  }
+  .header .avatar { font-size: 48px; margin-bottom: 8px; display: inline-block; animation: bounce 2s infinite; }
+  @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  .header h1 {
+    font-size: 28px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent2), var(--accent3));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .header .subtitle { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+  .header .refresh-badge {
+    display: inline-block; margin-top: 10px; font-size: 12px; color: var(--accent);
+    background: #f3e8ff; padding: 4px 12px; border-radius: 20px;
+  }
+  .header .refresh-badge .dot {
+    display: inline-block; width: 6px; height: 6px; background: var(--accent2);
+    border-radius: 50%; margin-right: 6px; animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--card-bg); border-radius: var(--radius); padding: 20px;
+    box-shadow: 0 2px 12px rgba(167, 139, 250, 0.08); border: 1px solid var(--border);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(167, 139, 250, 0.15); }
+  .stat-card .label { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; color: var(--text); }
+  .stat-card .value.accent { color: var(--accent2); }
+  .stat-card .value.green { color: var(--green); }
+  .stat-card .value.orange { color: var(--orange); }
+  .stat-card .value.pink { color: #f472b6; }
+  .stat-card .sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  .section {
+    background: var(--card-bg); border-radius: var(--radius); padding: 24px;
+    margin-bottom: 20px; box-shadow: 0 2px 12px rgba(167, 139, 250, 0.08); border: 1px solid var(--border);
+  }
+  .section h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+  .section-header-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+
+  /* --- Filter bar --- */
+  .filter-bar {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    padding: 12px 16px; background: #faf5ff; border-radius: 12px;
+    margin-bottom: 16px; border: 1px solid var(--border);
+  }
+  .filter-bar input, .filter-bar select {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13px; background: white; color: var(--text); outline: none;
+    font-family: inherit;
+  }
+  .filter-bar input:focus, .filter-bar select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(192,132,252,0.15); }
+  .filter-bar input { flex: 1; min-width: 160px; }
+  .filter-bar select { min-width: 100px; }
+  .filter-bar .badge { font-size: 12px; color: var(--text-muted); background: white; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border); }
+
+  /* --- Date group --- */
+  .date-group { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .date-group-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; cursor: pointer; user-select: none;
+    background: #faf5ff; transition: background 0.15s; font-size: 14px;
+  }
+  .date-group-header:hover { background: #f3e8ff; }
+  .date-group-header .left { display: flex; align-items: center; gap: 10px; }
+  .date-group-header .chevron { transition: transform 0.2s; font-size: 12px; color: var(--text-muted); }
+  .date-group-header .chevron.open { transform: rotate(90deg); }
+  .date-group-header .label { font-weight: 600; color: var(--text); }
+  .date-group-header .date-str { font-size: 12px; color: var(--text-muted); }
+  .date-group-header .group-summary { font-size: 12px; color: var(--text-muted); display: flex; gap: 12px; }
+  .date-group-body { display: none; }
+  .date-group-body.open { display: block; }
+
+  /* --- Sessions table --- */
+  .session-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .session-table th {
+    padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
+    color: var(--text-muted); font-weight: 500; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none;
+    white-space: nowrap; position: sticky; top: 0; background: white;
+  }
+  .session-table th:hover { color: var(--accent3); }
+  .session-table th .sort-icon { margin-left: 3px; font-size: 10px; opacity: 0.4; }
+  .session-table th .sort-icon.active { opacity: 1; }
+  .session-table td { padding: 8px 10px; border-bottom: 1px solid #f3e8ff; color: var(--text); }
+  .session-table tr:hover td { background: #faf5ff; }
+  .session-table .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; }
+  .model-tag-s { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; background: #f3e8ff; color: var(--accent3); font-weight: 500; }
+
+  /* --- Load more --- */
+  .load-more {
+    display: block; width: 100%; padding: 12px; margin-top: 8px;
+    border: 1px dashed var(--border); border-radius: 10px;
+    background: transparent; color: var(--accent3); font-size: 13px; cursor: pointer;
+    text-align: center; transition: all 0.15s; font-family: inherit;
+  }
+  .load-more:hover { background: #f3e8ff; border-color: var(--accent); }
+
+  /* --- Models table --- */
+  .models-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .models-table th, .models-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  .models-table th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .models-table td { color: var(--text); }
+  .models-table tr:last-child td { border-bottom: none; }
+  .models-table tr:hover td { background: #faf5ff; }
+
+  .footer { text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px; }
+  .footer .emoji { font-size: 16px; }
+
+  .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+  .empty-state { text-align: center; padding: 30px; color: var(--text-muted); }
+
+  @media (max-width: 640px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .session-table { font-size: 12px; }
+    .session-table th, .session-table td { padding: 6px; }
+    .filter-bar input, .filter-bar select { font-size: 12px; padding: 6px 10px; }
+  }
+</style>
 </head>
 <body>
-<header>
-  <h1>🔍 Token <span>Monitor</span></h1>
-  <div class="badge">↻ {REFRESH_SECONDS}s refresh</div>
-</header>
-
 <div class="container">
-
-  <!-- Summary cards -->
-  <div class="cards">
-    <div class="card deepseek">
-      <div class="label">DeepSeek</div>
-      <div class="value">{fmt_cost(deepseek_cost)}</div>
-      <div class="sub">{providers.get("deepseek", {}).get("calls", 0)} calls</div>
-    </div>
-    <div class="card xiaomi">
-      <div class="label">Xiaomi MiMo</div>
-      <div class="value">{fmt_cost(xiaomi_cost)}</div>
-      <div class="sub">{providers.get("xiaomi", {}).get("calls", 0)} calls</div>
-    </div>
-    <div class="card accent">
-      <div class="label">Total Cost</div>
-      <div class="value">{fmt_cost(grand_cost)}</div>
-      <div class="sub">{stats["total_models"]} models tracked</div>
+  <div class="header">
+    <div class="avatar">💰</div>
+    <h1>小珀 Token 监控面板</h1>
+    <div class="subtitle">Hermes Agent · 实时用量追踪 · DeepSeek + Xiaomi MiMo · 以人民币计价</div>
+    <div class="refresh-badge">
+      <span class="dot"></span>每 10 秒自动刷新 · <span id="last-update">--</span>
     </div>
   </div>
 
-  <!-- Model breakdown -->
-  <h2>📊 Per-Model Usage</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>Model</th><th>Provider</th><th>Calls</th><th>Tokens (In / Out)</th><th>Cost</th></tr>
-      </thead>
-      <tbody>
-        {''.join(model_rows) if model_rows else '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:24px">No data yet</td></tr>'}
-      </tbody>
-    </table>
+  <div class="stats-grid" id="stats-grid">
+    <div class="loading">💰 加载中～</div>
   </div>
 
-  <!-- Cost breakdown -->
-  <h2>💰 Cost by Provider</h2>
-  <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:28px">
-    {''.join(cost_bars) if cost_bars else '<p style="color:var(--muted)">No cost data</p>'}
+  <div class="section">
+    <div class="section-header-bar">
+      <h2>📋 会话记录</h2>
+      <span id="session-count" style="font-size:13px;color:var(--text-muted)"></span>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar" id="filter-bar">
+      <input type="text" id="search-input" placeholder="🔍 搜索会话 ID、来源、模型..." oninput="applyFilters()">
+      <select id="model-filter" onchange="applyFilters()">
+        <option value="">全部模型</option>
+      </select>
+      <select id="source-filter" onchange="applyFilters()">
+        <option value="">全部来源</option>
+      </select>
+      <select id="sort-select" onchange="applyFilters()">
+        <option value="time-desc">最新优先</option>
+        <option value="time-asc">最早优先</option>
+        <option value="cost-desc">费用从高到低</option>
+        <option value="cost-asc">费用从低到高</option>
+        <option value="output-desc">输出 Token 从高到低</option>
+        <option value="output-asc">输出 Token 从低到高</option>
+      </select>
+      <span class="badge" id="filter-count"></span>
+    </div>
+
+    <div id="sessions-container">
+      <div class="loading">💰 加载中～</div>
+    </div>
   </div>
 
-  <!-- Recent 24h -->
-  <h2>🕐 Last 24 Hours</h2>
-  <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:28px">
-    {''.join(recent_rows) if recent_rows else '<p style="color:var(--muted)">No recent activity</p>'}
+  <div class="section">
+    <h2>🤖 模型用量（按 Gateway 记录）</h2>
+    <div id="models-table">
+      <div class="loading">💰 加载中～</div>
+    </div>
   </div>
 
+  <div class="section">
+    <h2>💰 模型单价 (每百万 Token · ≤256K 上下文 · 人民币)</h2>
+    <div id="pricing-table">
+      <div class="loading">💰 加载中～</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:12px;line-height:1.8">
+      汇率 ¥6.85/USD · 定价来源:
+      <a href="https://api-docs.deepseek.com/quick_start/pricing" target="_blank" style="color:var(--accent3)">DeepSeek</a> ·
+      <a href="https://platform.xiaomimimo.com/docs/en-US/pricing" target="_blank" style="color:var(--accent3)">Xiaomi MiMo</a><br>
+      MiMo 256K-1M 大上下文区间价格约为上表的 2 倍（缓存命中/未命中/输出均翻倍）<br>
+      MiMo 缓存写入限时免费 · DeepSeek v4-pro 75% 折扣至 2026/05/31
+    </div>
+  </div>
+
+  <div class="footer">
+    <span class="emoji">(◍•ᴗ•◍) </span> 小珀 为你监控中 · 汇率 ¥6.85/USD · DeepSeek + Xiaomi MiMo 官方定价
+  </div>
 </div>
 
-<footer>
-  <span class="dot"></span> Token Monitor &middot; Updated {ts} &middot; Data source: {DB_PATH}
-</footer>
+<script>
+// ─── State ───────────────────────────────────────────
+const PAGE_SIZE = 20;
+let allSessions = [];
+let shownCount = 0;
+
+// ─── Format helpers ──────────────────────────────────
+function fmtNum(n) {
+  if (n == null) return '--';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toString();
+}
+function fmtCostCNY(cny) {
+  if (cny == null || cny === 0) return '¥0.00';
+  if (cny < 0.01) return '¥' + cny.toFixed(6);
+  if (cny < 1) return '¥' + cny.toFixed(4);
+  if (cny < 100) return '¥' + cny.toFixed(2);
+  return '¥' + cny.toFixed(2);
+}
+function getDateLabel(ts) {
+  const d = new Date(ts * 1000);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const weekStart = new Date(today); weekStart.setDate(weekStart.getDate() - today.getDay());
+  const dNorm = new Date(d); dNorm.setHours(0,0,0,0);
+  const diff = (today - dNorm) / 86400000;
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  if (dNorm >= weekStart) return '这周';
+  const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+  if (dNorm >= weekAgo) return '最近 7 天';
+  const monthAgo = new Date(today); monthAgo.setMonth(monthAgo.getMonth() - 1);
+  if (dNorm >= monthAgo) return '最近 30 天';
+  return '更早';
+}
+
+// ─── Group sessions ──────────────────────────────────
+function groupSessions(sessions) {
+  const groups = {};
+  const order = ['今天', '昨天', '这周', '最近 7 天', '最近 30 天', '更早'];
+  for (const s of sessions) {
+    const label = getDateLabel(s.started_at);
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(s);
+  }
+  return order.filter(k => groups[k]).map(k => ({ label: k, sessions: groups[k] }));
+}
+
+// ─── Sort sessions ───────────────────────────────────
+function sortSessions(sessions, sortKey) {
+  const copy = [...sessions];
+  const key = sortKey || 'time-desc';
+  const [field, dir] = key.split('-');
+  const mult = dir === 'desc' ? -1 : 1;
+  copy.sort((a, b) => {
+    let va, vb;
+    switch (field) {
+      case 'time': va = a.started_at || 0; vb = b.started_at || 0; break;
+      case 'cost': va = a.calculated_cost_cny || 0; vb = b.calculated_cost_cny || 0; break;
+      case 'output': va = a.output_tokens || 0; vb = b.output_tokens || 0; break;
+      default: va = a.started_at || 0; vb = b.started_at || 0; dir = 'desc';
+    }
+    return (va - vb) * mult;
+  });
+  // After sorting, re-group
+  return copy;
+}
+
+// ─── Apply filters ───────────────────────────────────
+function applyFilters() {
+  const search = (document.getElementById('search-input').value || '').trim().toLowerCase();
+  const modelFilter = document.getElementById('model-filter').value;
+  const sourceFilter = document.getElementById('source-filter').value;
+  const sortKey = document.getElementById('sort-select').value;
+
+  let filtered = allSessions.filter(s => {
+    if (search && !s.session_id?.toLowerCase().includes(search) &&
+        !(s.source || '').toLowerCase().includes(search) &&
+        !(s.model || '').toLowerCase().includes(search) &&
+        !(s.model_display || '').toLowerCase().includes(search)) return false;
+    if (modelFilter && s.model !== modelFilter && s.model_display !== modelFilter) return false;
+    if (sourceFilter && s.source !== sourceFilter) return false;
+    return true;
+  });
+
+  filtered = sortSessions(filtered, sortKey);
+  document.getElementById('filter-count').textContent = `${filtered.length} 条记录`;
+
+  // Update session total display
+  document.getElementById('session-count').textContent =
+    `共 ${allSessions.length} 条，已筛选 ${filtered.length} 条`;
+
+  renderGroupedSessions(filtered, true);
+}
+
+// ─── Render grouped sessions ─────────────────────────
+function renderGroupedSessions(sessions, reset) {
+  if (reset) shownCount = 0;
+  const grouped = groupSessions(sessions);
+
+  let totalShown = 0;
+  let html = '';
+  for (const group of grouped) {
+    if (totalShown >= PAGE_SIZE) {
+      // Not shown yet — will be handled by load more
+      break;
+    }
+    const remaining = PAGE_SIZE - totalShown;
+    const groupSessions = group.sessions.slice(0, remaining);
+    totalShown += groupSessions.length;
+    const totalSessions = group.sessions.length;
+    const totalCost = groupSessions.reduce((acc, s) => acc + (s.calculated_cost_cny || 0), 0);
+    const groupTotalCost = group.sessions.reduce((acc, s) => acc + (s.calculated_cost_cny || 0), 0);
+    const dateStr = groupSessions[0]?.started_at ? new Date(groupSessions[0].started_at * 1000).toLocaleDateString('zh-CN') : '';
+
+    html += `<div class="date-group">
+      <div class="date-group-header" onclick="toggleGroup(this)">
+        <div class="left">
+          <span class="chevron open">▶</span>
+          <span class="label">${group.label}</span>
+          <span class="date-str">${dateStr}</span>
+        </div>
+        <div class="group-summary">
+          <span>📋 ${totalSessions} 条</span>
+          <span>💰 ${fmtCostCNY(groupTotalCost)}</span>
+        </div>
+      </div>
+      <div class="date-group-body open">
+        <table class="session-table">
+          <thead><tr>
+            <th>时间</th><th>来源</th><th>模型</th><th>输入(命中/未命中)</th><th>命中率</th><th>输出</th><th>费用(CNY)</th>
+          </tr></thead>
+          <tbody>
+            ${groupSessions.map(s => {
+              const effInput = (s.cache_hit_tokens || 0) + (s.cache_miss_tokens || 0);
+              const hitRate = effInput > 0 ? (s.cache_hit_tokens / effInput * 100).toFixed(1) : '0.0';
+              const dt = s.started_at ? new Date(s.started_at * 1000).toLocaleString('zh-CN', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '--';
+              return `<tr>
+                <td style="white-space:nowrap" title="${s.session_id}">${dt}</td>
+                <td><span class="model-tag-s">${s.source || '--'}</span></td>
+                <td class="mono">${(s.model_display || s.model || '--').substring(0, 22)}${s.has_discount ? ' 🔥' : ''}</td>
+                <td class="mono">${fmtNum(s.cache_hit_tokens)} / ${fmtNum(s.cache_miss_tokens)}</td>
+                <td><span style="color:var(--green);font-weight:600">${hitRate}%</span></td>
+                <td class="mono">${fmtNum(s.output_tokens)}</td>
+                <td style="color:${s.calculated_cost_cny > 1 ? 'var(--orange)' : 'var(--text)'}">${fmtCostCNY(s.calculated_cost_cny)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  const totalAvailable = sessions.length;
+  const remaining = totalAvailable - totalShown;
+
+  if (remaining > 0) {
+    html += `<button class="load-more" onclick="loadMore()">📥 加载更多（还有 ${remaining} 条）</button>`;
+  } else if (totalAvailable > 0) {
+    html += `<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:13px;">✅ 已显示全部 ${totalAvailable} 条记录</div>`;
+  }
+
+  document.getElementById('sessions-container').innerHTML = html ||
+    '<div class="empty-state">🔍 没有匹配的会话记录</div>';
+  shownCount = totalShown;
+}
+
+function toggleGroup(header) {
+  const chevron = header.querySelector('.chevron');
+  const body = header.nextElementSibling;
+  chevron.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+function loadMore() {
+  const sortKey = document.getElementById('sort-select').value;
+  const search = document.getElementById('search-input').value.trim().toLowerCase();
+  const modelFilter = document.getElementById('model-filter').value;
+  const sourceFilter = document.getElementById('source-filter').value;
+
+  let filtered = allSessions.filter(s => {
+    if (search && !s.session_id?.toLowerCase().includes(search) &&
+        !(s.source || '').toLowerCase().includes(search) &&
+        !(s.model || '').toLowerCase().includes(search)) return false;
+    if (modelFilter && s.model !== modelFilter && s.model_display !== modelFilter) return false;
+    if (sourceFilter && s.source !== sourceFilter) return false;
+    return true;
+  });
+  filtered = sortSessions(filtered, sortKey);
+
+  // Increase PAGE_SIZE effectively
+  shownCount += PAGE_SIZE;
+  renderGroupedSessions(filtered, true);
+}
+
+// ─── Render main ─────────────────────────────────────
+function render(data) {
+  // Stats cards
+  const s = data.summary;
+  const discountTag = data.models.some(m => m.has_discount) ? ' 🔥75%off' : '';
+  const totalEffectiveInput = (s.total_cache_read || 0) + (s.total_input || 0);
+  const cacheHitRate = totalEffectiveInput > 0 ? (s.total_cache_read / totalEffectiveInput * 100).toFixed(1) : '0.0';
+
+  const statsHTML = `
+    <div class="stat-card">
+      <div class="label">📊 总 Token 数（含缓存）</div>
+      <div class="value accent">${fmtNum(s.total_tokens)}</div>
+      <div class="sub">命中 ${fmtNum(s.total_cache_read)} + 未命中 ${fmtNum(Math.max(0, s.total_input))} + 输出 ${fmtNum(s.total_output)}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">💾 缓存命中率</div>
+      <div class="value green">${cacheHitRate}%</div>
+      <div class="sub">命中 ${fmtNum(s.total_cache_read)} · 未命中 ${fmtNum(Math.max(0, s.total_input))}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">💬 总会话 / 工具调用</div>
+      <div class="value">${s.total_sessions} / ${s.total_tool_calls}</div>
+      <div class="sub">活跃 ${s.active_days} 天 · 消息 ${s.total_messages} 条</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">💰 预估费用（Gateway 记录）${discountTag}</div>
+      <div class="value ${s.total_cost_cny > 3 ? 'orange' : 'green'}">${fmtCostCNY(s.total_cost_cny)}</div>
+      <div class="sub">≈ $${(s.total_cost_cny / 6.85).toFixed(4)} USD · 基于 DeepSeek 官方定价</div>
+    </div>
+  `;
+  document.getElementById('stats-grid').innerHTML = statsHTML;
+
+  // Store sessions globally
+  allSessions = data.sessions || [];
+
+  // Populate filter dropdowns
+  const modelSelect = document.getElementById('model-filter');
+  const sourceSelect = document.getElementById('source-filter');
+  const currentModel = modelSelect.value;
+  const currentSource = sourceSelect.value;
+
+  const models = [...new Set(allSessions.map(s => s.model_display || s.model).filter(Boolean))];
+  const sources = [...new Set(allSessions.map(s => s.source).filter(Boolean))];
+
+  modelSelect.innerHTML = '<option value="">全部模型</option>' +
+    models.map(m => `<option value="${m}" ${m === currentModel ? 'selected' : ''}>${m}</option>`).join('');
+  sourceSelect.innerHTML = '<option value="">全部来源</option>' +
+    sources.map(s => `<option value="${s}" ${s === currentSource ? 'selected' : ''}>${s}</option>`).join('');
+
+  document.getElementById('session-count').textContent = `共 ${allSessions.length} 条`;
+
+  // Apply filters and render
+  applyFilters();
+
+  // Models table
+  const modelsHTML = `
+    <table class="models-table">
+      <thead><tr>
+        <th>模型</th><th>会话</th><th>总 Token</th><th>输入</th><th>输出</th><th>命中率</th><th>费用(CNY)</th>
+      </tr></thead>
+      <tbody>
+        ${data.models.map(m => {
+          const effInput = (m.cache_read_tokens || 0) + (m.input_tokens || 0);
+          const hitRate = effInput > 0 ? ((m.cache_read_tokens || 0) / effInput * 100).toFixed(1) : '0.0';
+          return `<tr>
+            <td class="mono">${m.model}${m.has_discount ? ' 🔥' : ''}${m.vendor === 'Xiaomi' ? ' <span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;background:#fff3e0;color:#e65100;font-weight:500">Xiaomi</span>' : ''}</td>
+            <td>${m.sessions}</td>
+            <td><strong>${fmtNum(m.total_tokens)}</strong></td>
+            <td>${fmtNum(m.input_tokens)} <span style="font-size:11px;color:var(--text-muted)">未命中</span><br><span style="font-size:11px;color:var(--text-muted)">命中 ${fmtNum(m.cache_read_tokens)}</span></td>
+            <td>${fmtNum(m.output_tokens)}</td>
+            <td><span style="color:var(--green);font-weight:600">${hitRate}%</span></td>
+            <td style="color:${m.cost_cny > 1 ? 'var(--orange)' : 'var(--text)'}">${fmtCostCNY(m.cost_cny)}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  document.getElementById('models-table').innerHTML = modelsHTML;
+
+  // Pricing table
+  const pricing = data.pricing || [];
+  const usdToCny = 6.85;
+  const pricingHTML = `
+    <table class="models-table">
+      <thead><tr>
+        <th>模型</th>
+        <th>输入 (缓存命中)</th>
+        <th>输入 (缓存未命中)</th>
+        <th>输出</th>
+        <th>状态</th>
+      </tr></thead>
+      <tbody>
+        ${pricing.map(p => {
+          const hasDiscount = p.has_discount;
+          const cny = p.price_cny || {};
+          // CNY as primary display, USD as secondary
+          const hitCell = hasDiscount
+            ? `<span style="color:var(--green)"><strong>¥${cny.input_cache_hit}</strong></span> <span style="font-size:11px;color:var(--text-muted);text-decoration:line-through">¥${(p.original_input_cache_hit * usdToCny).toFixed(3)}</span><br><span style="font-size:11px;color:var(--text-muted)">≈ $${p.input_cache_hit}</span>`
+            : `<strong>¥${cny.input_cache_hit}</strong><br><span style="font-size:11px;color:var(--text-muted)">≈ $${p.input_cache_hit}</span>`;
+          const missCell = hasDiscount
+            ? `<span style="color:var(--green)"><strong>¥${cny.input_cache_miss}</strong></span> <span style="font-size:11px;color:var(--text-muted);text-decoration:line-through">¥${(p.original_input_cache_miss * usdToCny).toFixed(3)}</span><br><span style="font-size:11px;color:var(--text-muted)">≈ $${p.input_cache_miss}</span>`
+            : `<strong>¥${cny.input_cache_miss}</strong><br><span style="font-size:11px;color:var(--text-muted)">≈ $${p.input_cache_miss}</span>`;
+          const outCell = hasDiscount
+            ? `<span style="color:var(--green)"><strong>¥${cny.output}</strong></span> <span style="font-size:11px;color:var(--text-muted);text-decoration:line-through">¥${(p.original_output * usdToCny).toFixed(3)}</span><br><span style="font-size:11px;color:var(--text-muted)">≈ $${p.output}</span>`
+            : `<strong>¥${cny.output}</strong><br><span style="font-size:11px;color:var(--text-muted)">≈ $${p.output}</span>`;
+          const discountNote = hasDiscount
+            ? `<span style="font-size:11px;color:var(--orange)">🔥${p.discount_pct}% 折扣至 ${p.discount_until}</span>`
+            : '<span style="font-size:11px;color:var(--text-muted)">标准定价</span>';
+          const vendorTag = p.vendor === 'Xiaomi'
+            ? '<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;background:#fff3e0;color:#e65100;margin-left:6px;font-weight:500">Xiaomi</span>'
+            : '<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;background:#e8f5e9;color:#2e7d32;margin-left:6px;font-weight:500">DeepSeek</span>';
+          return `<tr>
+            <td class="mono"><strong>${p.model}</strong>${vendorTag}</td>
+            <td class="mono">${hitCell}</td>
+            <td class="mono">${missCell}</td>
+            <td class="mono">${outCell}</td>
+            <td>${discountNote}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  document.getElementById('pricing-table').innerHTML = pricingHTML;
+}
+
+// ─── Fetch ───────────────────────────────────────────
+async function fetchData() {
+  try {
+    const resp = await fetch('api/data');
+    const data = await resp.json();
+    render(data);
+    document.getElementById('last-update').textContent =
+      new Date().toLocaleTimeString('zh-CN');
+  } catch (e) {
+    console.error('Failed to fetch:', e);
+  }
+}
+
+fetchData();
+setInterval(fetchData, 10000);
+</script>
 </body>
-</html>"""
+</html>
+'''
 
 
-# ── HTTP Server ─────────────────────────────────────────────────────────────
+def query_db():
+    """查询 state.db 获取 token 用量数据"""
+    if not os.path.exists(DB_PATH):
+        return {"error": "数据库未找到"}
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                COUNT(*) as total_sessions,
+                COALESCE(SUM(input_tokens), 0) as total_input,
+                COALESCE(SUM(output_tokens), 0) as total_output,
+                COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) as total_tokens,
+                COALESCE(SUM(tool_call_count), 0) as total_tool_calls,
+                COALESCE(SUM(message_count), 0) as total_messages,
+                COALESCE(SUM(cache_read_tokens), 0) as total_cache_read,
+                COALESCE(SUM(cache_write_tokens), 0) as total_cache_write,
+                COALESCE(SUM(reasoning_tokens), 0) as total_reasoning
+            FROM sessions
+        """)
+        summary = dict(cur.fetchone())
+
+        cur.execute("""
+            SELECT COUNT(DISTINCT date(started_at, 'unixepoch')) as active_days
+            FROM sessions
+        """)
+        summary["active_days"] = cur.fetchone()["active_days"] or 0
+
+        cur.execute("""
+            SELECT id as session_id, source, model, input_tokens, output_tokens,
+                   cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                   tool_call_count, message_count, estimated_cost_usd,
+                   actual_cost_usd, started_at, ended_at, title
+            FROM sessions
+            ORDER BY started_at DESC
+            LIMIT 500
+        """)
+        sessions_raw = [dict(row) for row in cur.fetchall()]
+        # 逐会话计算实际费用
+        sessions = []
+        total_calculated_cost_cny = 0.0
+        for s in sessions_raw:
+            model_raw = s.get("model", "")
+            model_display = PRICING.get(model_raw, {}).get("display_name", model_raw)
+            cost_info = calc_cost(
+                model_raw,
+                s.get("input_tokens", 0),
+                s.get("output_tokens", 0),
+                s.get("cache_read_tokens", 0),
+            )
+            s["calculated_cost"] = cost_info["cost"]
+            s["calculated_cost_cny"] = cost_info["cost_cny"]
+            s["cache_hit_tokens"] = cost_info["cache_hit_tokens"]
+            s["cache_miss_tokens"] = cost_info["cache_miss_tokens"]
+            s["has_discount"] = cost_info["has_discount"]
+            s["model_display"] = model_display
+            total_calculated_cost_cny += cost_info["cost_cny"]
+            sessions.append(s)
+
+        summary["total_cost"] = round(total_calculated_cost_cny / USD_TO_CNY, 6)
+        summary["total_cost_cny"] = round(total_calculated_cost_cny, 6)
+
+        # 额外聚合：从全部会话计算总费用（不依赖 LIMIT 500）
+        cur.execute("""
+            SELECT
+                CASE
+                    WHEN model IN ('deepseek-chat', 'deepseek-reasoner') THEN 'deepseek-v4-flash'
+                    WHEN model IN ('mimo-v2-pro') THEN 'mimo-v2.5-pro'
+                    WHEN model IN ('xiaomi/mimo-v2.5') THEN 'mimo-v2.5'
+                    ELSE model
+                END as display_model,
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens
+            FROM sessions
+            GROUP BY display_model
+        """)
+        all_cost_cny = 0.0
+        for row in cur.fetchall():
+            ci = calc_cost(row["display_model"], row["input_tokens"], row["output_tokens"], row["cache_read_tokens"])
+            all_cost_cny += ci["cost_cny"]
+        summary["total_cost"] = round(all_cost_cny / USD_TO_CNY, 6)
+        summary["total_cost_cny"] = round(all_cost_cny, 6)
+
+        # Model breakdown — 合并 deepseek-chat/reasoner 到 flash
+        cur.execute("""
+            SELECT
+                CASE
+                    WHEN model IN ('deepseek-chat', 'deepseek-reasoner') THEN 'deepseek-v4-flash'
+                    WHEN model IN ('mimo-v2-pro') THEN 'mimo-v2.5-pro'
+                    WHEN model IN ('xiaomi/mimo-v2.5') THEN 'mimo-v2.5'
+                    ELSE model
+                END as display_model,
+                COUNT(*) as sessions,
+                COALESCE(SUM(input_tokens), 0) as input_tokens,
+                COALESCE(SUM(output_tokens), 0) as output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+                COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) as total_tokens
+            FROM sessions
+            GROUP BY display_model
+            ORDER BY total_tokens DESC
+        """)
+        models_raw = [dict(row) for row in cur.fetchall()]
+
+        models = []
+        for m in models_raw:
+            cost_info = calc_cost(
+                m.get("display_model", ""),
+                m.get("input_tokens", 0),
+                m.get("output_tokens", 0),
+                m.get("cache_read_tokens", 0),
+            )
+            m["cost"] = cost_info["cost"]
+            m["cost_cny"] = cost_info["cost_cny"]
+            m["has_discount"] = cost_info["has_discount"]
+            m["discount_pct"] = cost_info["discount_pct"]
+            m["model"] = m.get("display_model", "")
+            m["vendor"] = PRICING.get(m["model"], {}).get("vendor", "DeepSeek")
+            models.append(m)
+
+        conn.close()
+
+        # Build pricing info for frontend
+        pricing_export = []
+        seen = set()
+        # 用户期望的近似人民币显示值
+        CNY_DISPLAY = {
+            "deepseek-v4-flash": {"input_cache_hit": 0.02, "input_cache_miss": 1, "output": 2},
+            "deepseek-v4-pro": {"input_cache_hit": 0.025, "input_cache_miss": 3, "output": 6},
+            "mimo-v2.5-pro": {"input_cache_hit": 1.40, "input_cache_miss": 7, "output": 21},
+            "mimo-v2.5": {"input_cache_hit": 0.56, "input_cache_miss": 2.80, "output": 14},
+            "mimo-v2-flash": {"input_cache_hit": 0.07, "input_cache_miss": 0.70, "output": 2.10},
+        }
+        for model_key, p in PRICING.items():
+            display = p.get("display_name", model_key)
+            if display in seen:
+                continue
+            seen.add(display)
+            entry = {
+                "model": display,
+                "input_cache_hit": p["input_cache_hit"],
+                "input_cache_miss": p["input_cache_miss"],
+                "output": p["output"],
+                "price_cny": CNY_DISPLAY.get(display, {}),
+                "vendor": p.get("vendor", "DeepSeek"),
+            }
+            if p.get("discount"):
+                entry["has_discount"] = True
+                entry["discount_pct"] = p["discount_pct"]
+                entry["discount_until"] = p.get("discount_until", "")
+                entry["original_input_cache_hit"] = p.get("original_input_cache_hit")
+                entry["original_input_cache_miss"] = p.get("original_input_cache_miss")
+                entry["original_output"] = p.get("original_output")
+            pricing_export.append(entry)
+
+        return {
+            "summary": summary,
+            "sessions": sessions,
+            "models": models,
+            "pricing": pricing_export,
+            "updated_at": int(time.time()),
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
 
 class TokenMonitorHandler(http.server.BaseHTTPRequestHandler):
-    """Single-handler: / returns the dashboard, /api/stats returns JSON."""
-
-    def log_message(self, fmt, *args):
-        """Quiet logging – only show when verbose."""
-        if os.environ.get("TOKEN_MONITOR_VERBOSE"):
-            super().log_message(fmt, *args)
+    def log_message(self, format, *args):
+        pass
 
     def do_GET(self):
-        path = self.path.rstrip("/") or "/"
+        parsed = urlparse(self.path)
+        path = parsed.path
 
-        if path == "/" or path == "/index.html":
-            self._serve_dashboard()
-        elif path == "/api/stats":
-            self._serve_api()
-        elif path == "/health":
-            self._serve_json({"status": "ok"})
-        else:
-            self.send_error(404)
+        if path == "/api/data":
+            data = query_db()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            return
 
-    def _serve_dashboard(self):
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        try:
-            stats = query_stats(conn)
-        finally:
-            conn.close()
-        html = build_html(stats)
-        body = html.encode("utf-8")
+        if path == "/api/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "time": int(time.time())}).encode())
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(HTML_PAGE.encode("utf-8"))
 
-    def _serve_api(self):
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        try:
-            stats = query_stats(conn)
-        finally:
-            conn.close()
-        self._serve_json(stats)
-
-    def _serve_json(self, data):
-        body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+    def do_POST(self):
+        self.send_response(404)
         self.end_headers()
-        self.wfile.write(body)
+
+    def do_DELETE(self):
+        self.send_response(404)
+        self.end_headers()
 
 
 def main():
-    # Ensure parent directory exists
-    db_dir = os.path.dirname(os.path.abspath(DB_PATH)) or "."
-    os.makedirs(db_dir, exist_ok=True)
-
-    print(f"[token_monitor] Database: {DB_PATH}")
-    print(f"[token_monitor] Port:     {PORT}")
-    print(f"[token_monitor] Refresh:  {REFRESH_SECONDS}s")
-    print(f"[token_monitor] Simulate: {SIMULATE}")
-
-    # Initialize DB
-    conn = init_db()
-    if SIMULATE:
-        seed_simulated_data(conn)
-    conn.close()
-
-    # Start server
-    server = http.server.HTTPServer(("127.0.0.1", PORT), TokenMonitorHandler)
-    print(f"[token_monitor] Dashboard → http://localhost:{PORT}")
-    print(f"[token_monitor] API      → http://localhost:{PORT}/api/stats")
-    print("[token_monitor] Press Ctrl+C to stop")
-
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n[token_monitor] Shutting down...")
-        server.shutdown()
+    server = http.server.ThreadingHTTPServer((HOST, PORT), TokenMonitorHandler)
+    print(f"💰 小珀 Token Monitor 启动成功！（人民币计价）")
+    print(f"   地址: http://{HOST}:{PORT}")
+    print(f"   数据源: {DB_PATH}")
+    print(f"   汇率: ¥{USD_TO_CNY}/USD")
+    server.serve_forever()
 
 
 if __name__ == "__main__":

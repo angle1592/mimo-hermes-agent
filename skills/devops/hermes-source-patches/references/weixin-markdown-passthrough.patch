@@ -1,0 +1,12 @@
+--- a/usr/local/lib/hermes-agent/gateway/platforms/weixin.py
++++ b/usr/local/lib/hermes-agent/gateway/platforms/weixin.py
+@@ -2121,7 +2121,8 @@
+     def format_message(self, content: Optional[str]) -> str:
+         if content is None:
+             return ""
+-        return _convert_markdown_for_weixin(content)
++        # Pass through raw Markdown — WeChat now renders MD natively
++        return content
+ 
+ 
+ async def send_weixin_direct(

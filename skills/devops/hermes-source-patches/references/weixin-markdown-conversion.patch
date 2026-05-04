@@ -1,0 +1,142 @@
+diff --git a/gateway/platforms/weixin.py b/gateway/platforms/weixin.py
+index 426d6e27e..87c76072a 100644
+--- a/gateway/platforms/weixin.py
++++ b/gateway/platforms/weixin.py
+@@ -852,6 +852,128 @@ def _pack_markdown_blocks_for_weixin(content: str, max_length: int) -> List[str]
+     return packed
+ 
+ 
++def _convert_markdown_for_weixin(content: str) -> str:
++    """Convert Markdown to WeChat-friendly plain text.
++
++    Strips markdown syntax markers while preserving readability:
++    - Headers → 【Title】 / 「Title」
++    - **bold** → bold
++    - *italic* → italic
++    - `code` → 「code」
++    - [text](url) → text (url)
++    - Tables → list format
++    - Blockquotes → indented with │
++    - Horizontal rules → ─────
++    - Lists (-, *) → · item
++    """
++    lines = content.splitlines()
++    result: List[str] = []
++    in_code_block = False
++    blank_run = 0
++    table_buf: List[str] = []
++
++    def _flush_table() -> None:
++        nonlocal table_buf
++        if table_buf:
++            result.append(_rewrite_table_block_for_weixin(table_buf))
++            table_buf = []
++
++    def _inline(text: str) -> str:
++        # Images: ![alt](url) → [图片]
++        text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "[图片]", text)
++        # Links: [text](url) → text (url)
++        text = _MARKDOWN_LINK_RE.sub(lambda m: f"{m.group(1)} ({m.group(2)})", text)
++        # Bold: **text** or __text__ → text
++        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
++        text = re.sub(r"__(.+?)__", r"\1", text)
++        # Strikethrough: ~~text~~ → text
++        text = re.sub(r"~~(.+?)~~", r"\1", text)
++        # Italic: *text* or _text_ (single char delimiters, not adjacent to *)
++        text = re.sub(r"(?<!\*)\*(?!\*)([^*]+?)\*(?!\*)", r"\1", text)
++        text = re.sub(r"(?!_)_(?!_)([^_]+?)_(?!_)", r"\1", text)
++        # Inline code: `text` → 「text」
++        text = re.sub(r"`([^`]+)`", r"「\1」", text)
++        return text
++
++    for raw_line in lines:
++        line = raw_line.rstrip()
++
++        # Code fences: preserve as-is
++        if _FENCE_RE.match(line.strip()):
++            _flush_table()
++            in_code_block = not in_code_block
++            result.append(line)
++            blank_run = 0
++            continue
++
++        if in_code_block:
++            result.append(line)
++            continue
++
++        stripped = line.strip()
++
++        # Blank lines
++        if not stripped:
++            _flush_table()
++            blank_run += 1
++            if blank_run <= 1:
++                result.append("")
++            continue
++
++        blank_run = 0
++
++        # Table rows: collect for batch conversion
++        if stripped.startswith("|") or _TABLE_RULE_RE.match(stripped):
++            table_buf.append(stripped)
++            continue
++        else:
++            _flush_table()
++
++        # Headers
++        header_match = _HEADER_RE.match(stripped)
++        if header_match:
++            level = len(header_match.group(1))
++            title = _inline(header_match.group(2).strip())
++            if level == 1:
++                result.append(f"【{title}】")
++            elif level == 2:
++                result.append(f"「{title}」")
++            else:
++                result.append(title)
++            continue
++
++        # Horizontal rules
++        if re.match(r"^(?:---+|\*\*\*+|___+)\s*$", stripped):
++            result.append("─" * 20)
++            continue
++
++        # Blockquotes: > text → │ text
++        if stripped.startswith(">"):
++            quote_text = stripped.lstrip(">").strip()
++            result.append(f"│ {_inline(quote_text)}")
++            continue
++
++        # Unordered lists: - item or * item → · item
++        list_match = re.match(r"^([ \t]*)(?:[-*])\s+(.+)$", raw_line)
++        if list_match:
++            indent = list_match.group(1)
++            item_text = _inline(list_match.group(2))
++            result.append(f"{indent}· {item_text}")
++            continue
++
++        # Ordered lists: keep as-is but process inline
++        ordered_match = re.match(r"^([ \t]*\d+\.\s+)(.+)$", raw_line)
++        if ordered_match:
++            result.append(f"{ordered_match.group(1)}{_inline(ordered_match.group(2))}")
++            continue
++
++        # Regular text: process inline markdown
++        result.append(_inline(stripped))
++
++    _flush_table()
++    return "\n".join(result).strip()
++
++
+ def _split_text_for_weixin_delivery(
+     content: str, max_length: int, split_per_line: bool = False,
+ ) -> List[str]:
+@@ -1974,7 +2096,7 @@ class WeixinAdapter(BasePlatformAdapter):
+     def format_message(self, content: Optional[str]) -> str:
+         if content is None:
+             return ""
+-        return _normalize_markdown_blocks(content)
++        return _convert_markdown_for_weixin(content)
+ 
+ 
+ async def send_weixin_direct(

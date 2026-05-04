@@ -1,0 +1,94 @@
+diff --git a/tools/send_message_tool.py b/tools/send_message_tool.py
+index a2321c2e..8e0857b8 100644
+--- a/tools/send_message_tool.py
++++ b/tools/send_message_tool.py
+@@ -1313,18 +1313,83 @@ async def _send_homeassistant(token, extra, chat_id, message):
+ 
+ 
+ async def _send_dingtalk(extra, chat_id, message):
+-    """Send via DingTalk robot webhook.
++    """Send via DingTalk Robot OpenAPI (proactive) with webhook fallback.
+ 
+-    Note: The gateway's DingTalk adapter uses per-session webhook URLs from
+-    incoming messages (dingtalk-stream SDK).  For cross-platform send_message
+-    delivery we use a static robot webhook URL instead, which must be
+-    configured via ``DINGTALK_WEBHOOK_URL`` env var or ``webhook_url`` in the
+-    platform's extra config.
++    Priority:
++    1. Robot OpenAPI proactive send (uses client_id/client_secret from extra)
++    2. Static webhook URL (DINGTALK_WEBHOOK_URL or webhook_url in extra)
+     """
+     try:
+         import httpx
+     except ImportError:
+         return {"error": "httpx not installed"}
++
++    # Step 1: Try Robot OpenAPI proactive send
++    client_id = extra.get("client_id") or os.getenv("DINGTALK_CLIENT_ID", "")
++    client_secret = extra.get("client_secret") or os.getenv("DINGTALK_CLIENT_SECRET", "")
++    if client_id and client_secret:
++        try:
++            async with httpx.AsyncClient(timeout=15.0) as client:
++                # Get OAuth access token
++                token_resp = await client.post(
++                    "https://api.dingtalk.com/v1.0/oauth2/accessToken",
++                    json={"appKey": client_id, "appSecret": client_secret},
++                )
++                if token_resp.status_code == 200:
++                    token_data = token_resp.json()
++                    access_token = token_data.get("accessToken")
++                    if access_token:
++                        # Determine if it's a group (cidXXXX==) or DM chat_id
++                        if chat_id.startswith("cid"):
++                            # Group message
++                            send_url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
++                            payload = {
++                                "robotCode": client_id,
++                                "openConversationId": chat_id,
++                                "msgKey": "sampleMarkdown",
++                                "msgParam": json.dumps({
++                                    "title": "Hermes Agent",
++                                    "text": message,
++                                }),
++                            }
++                        else:
++                            # User DM
++                            send_url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
++                            payload = {
++                                "robotCode": client_id,
++                                "userIds": [chat_id],
++                                "msgKey": "sampleMarkdown",
++                                "msgParam": json.dumps({
++                                    "title": "Hermes Agent",
++                                    "text": message,
++                                }),
++                            }
++
++                        send_resp = await client.post(
++                            send_url,
++                            headers={"x-acs-dingtalk-access-token": access_token},
++                            json=payload,
++                        )
++
++                        if send_resp.status_code == 200:
++                            return {"success": True, "platform": "dingtalk", "chat_id": chat_id}
++                        elif send_resp.status_code == 403:
++                            # Permission error — extract required scope
++                            try:
++                                body = send_resp.json()
++                                scopes = body.get("accessDeniedDetail", {}).get("requiredScopes", [])
++                                if scopes:
++                                    return {"error": f"DingTalk permission missing. Go to open-dev.dingtalk.com → 权限管理, search and apply: {scopes[0]}"}
++                            except Exception:
++                                pass
++                            return {"error": f"DingTalk API 403: missing robot proactive messaging permission"}
++                        else:
++                            body_text = await send_resp.aread()
++                            return {"error": f"DingTalk API error: HTTP {send_resp.status_code} {body_text[:200].decode()}"}
++        except Exception as e:
++            return {"error": f"DingTalk proactive send failed: {e}"}
++
++    # Step 2: Fallback to static webhook URL
+     try:
+         webhook_url = extra.get("webhook_url") or os.getenv("DINGTALK_WEBHOOK_URL", "")
+         if not webhook_url:
