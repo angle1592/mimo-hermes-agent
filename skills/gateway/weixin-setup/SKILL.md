@@ -138,7 +138,7 @@ img.save("/tmp/weixin_qr.png")
 
 Then send the URL to the user (e.g., via DingTalk): `http://<server>/files/weixin_qr.png`
 
-**Nginx path note**: Default nginx root is `/usr/share/nginx/html`. ⚠️ **Use `/audio/` path, NOT `/files/`** — this server has a `server_name 47.119.146.203` block with a catch-all `location /` that proxies to the Hermes Dashboard (port 9119), so `/files/` gets intercepted. The `/audio/` path has a dedicated `alias` directive with `auth_basic off` in both server blocks. Copy to: `cp /tmp/weixin_qr.png /usr/share/nginx/html/audio/weixin_qr.png` → accessible at `http://47.119.146.203/audio/weixin_qr.png`.
+**Nginx path note**: Default nginx root is `/usr/share/nginx/html`. ⚠️ **Use `/audio/` path, NOT `/files/`** — this server has a `server_name YOUR_SERVER_IP` block with a catch-all `location /` that proxies to the Hermes Dashboard (port 9119), so `/files/` gets intercepted. The `/audio/` path has a dedicated `alias` directive with `auth_basic off` in both server blocks. Copy to: `cp /tmp/weixin_qr.png /usr/share/nginx/html/audio/weixin_qr.png` → accessible at `http://YOUR_SERVER_IP/audio/weixin_qr.png`.
 
 ### Step 3: Poll for scan confirmation
 

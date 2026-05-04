@@ -338,7 +338,7 @@ grep -i "delivery error\|No valid session_webhook" ~/.hermes/logs/gateway.log ~/
 If you already have cron jobs with `deliver: "origin"`, update them to use the group's chat ID directly:
 
 ```bash
-hermes cron update <job-id> --deliver "dingtalk:cidVvEgTg0rsWHHA1DKVmydA=="
+hermes cron update <job-id> --deliver "dingtalk:REDACTED_CHAT_ID"
 ```
 
 This can also be done via the `cronjob` tool by passing `deliver` and `model` (as an object `{model: "...", provider: "..."}`) in the update action.
