@@ -164,6 +164,7 @@ git remote set-url origin https://github.com/owner/repo.git
 
 ## Pitfalls
 
+- **Terminal CWD stuck on deleted directory** — If you `rm -rf` the current working directory while a persistent terminal session is using it, ALL subsequent terminal calls fail with `FileNotFoundError: [Errno 2] No such file or directory`. The `workdir` parameter won't help. Workaround: use `execute_code` (Python subprocess with explicit `cwd=`) instead of terminal until the session resets. Prevention: always `cd` to a stable directory (like `/root`) before deleting repos.
 - **Mirrors come and go.** A mirror that worked today may be down tomorrow. If the configured mirror stops working, test alternatives and switch.
 - **SSH protocol** (`git@github.com:user/repo.git`) is NOT affected by `insteadOf`. The mirror only works for `https://github.com/` URLs. If SSH clones fail, use HTTPS URLs instead.
 - **ghproxy.net** sometimes returns HTTP/2 PROTOCOL_ERROR. Retry with `git -c http.version=HTTP/1.1 clone ...` as a workaround.

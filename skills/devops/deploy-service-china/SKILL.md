@@ -377,3 +377,7 @@ If the server became unresponsive or was hard-rebooted, see `references/server-d
 ## Filesystem Cleanup
 
 When the home directory accumulates test files, scraped HTML, old scripts, and cache, see `references/filesystem-cleanup.md` for the audit procedure and safe-to-delete checklist.
+
+## Automated Repo Sync
+
+Keep a GitHub repo in sync with local Hermes config and custom skills. See `references/repo-sync.md` for the full pattern (whitelist, sanitization, cron setup, mirror credentials).

@@ -336,7 +336,7 @@ platforms:
     enabled: true
     home_channel:
       platform: dingtalk
-      chat_id: REDACTED_CHAT_ID
+      chat_id: cidnVvEgTg0rsWHHA1DKVmydA==
       name: 星际娱乐和平公司
     extra:
       client_id: dinguj38jyamwnlu8y0e
