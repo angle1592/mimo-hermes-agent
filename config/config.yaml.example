@@ -209,7 +209,7 @@ stt:
   mistral:
     model: voxtral-mini-latest
 voice:
-  record_key: "FILL_IN"
+  record_key: FILL_IN
   max_recording_seconds: 120
   auto_tts: false
   beep_enabled: true
@@ -336,11 +336,11 @@ platforms:
     enabled: true
     home_channel:
       platform: dingtalk
-      chat_id: cidnVvEgTg0rsWHHA1DKVmydA==
+      chat_id: REDACTED
       name: 星际娱乐和平公司
     extra:
       client_id: dinguj38jyamwnlu8y0e
-      client_secret: "REDACTED"
+      client_secret: REDACTED
 plugins:
   enabled:
   - disk-cleanup

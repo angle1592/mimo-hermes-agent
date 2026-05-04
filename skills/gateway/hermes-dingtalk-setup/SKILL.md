@@ -66,7 +66,7 @@ platforms:
     enabled: true
     extra:
       client_id: "your-app-key-here"
-      client_secret: "your-app-secret-here"
+      client_secret: REDACTED
 ```
 
 For optional group-chat settings:
@@ -77,7 +77,7 @@ platforms:
     enabled: true
     extra:
       client_id: "your-app-key-here"
-      client_secret: "your-app-secret-here"
+      client_secret: REDACTED
       require_mention: true     # must @bot to trigger (env: DINGTALK_REQUIRE_MENTION)
 ```
 
@@ -138,11 +138,11 @@ The home channel is where Hermes delivers cron job results and cross-platform me
        enabled: true
        home_channel:
          platform: dingtalk
-         chat_id: "cidXXX=="
+         chat_id: REDACTED
          name: "Cron Results Group"
        extra:
          client_id: "..."
-         client_secret: "..."
+         client_secret: REDACTED
    ```
 
 3. Restart the gateway for changes to take effect.
@@ -185,7 +185,7 @@ platforms:
     enabled: true
     extra:
       client_id: "your-app-key-here"
-      client_secret: "your-app-secret-here"
+      client_secret: REDACTED
       webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxxx"
 ```
 
@@ -230,7 +230,7 @@ async def _send_dingtalk(extra, chat_id, message):
     # Step 1: Try Robot OpenAPI proactive send
     client_id = extra.get("client_id") or os.getenv("DINGTALK_CLIENT_ID", "")
     client_secret = extra.get("client_secret") or os.getenv("DINGTALK_CLIENT_SECRET", "")
-    if client_id and client_secret:
+    if client_id and client_secret:REDACTED
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 # Get OAuth access token
