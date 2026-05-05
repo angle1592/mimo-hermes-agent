@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（真实案例：319 commits，4 个 patch 全部无冲突自动适配）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）和 `references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -115,7 +115,13 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 
 ## Pitfalls
 
-1. **`patch` 命令未安装** — restore-all.sh 会静默跳过所有 patch！阿里云 Linux 默认没有 `patch`。安装：`yum install -y patch`。restore 脚本应加依赖检查：`command -v patch >/dev/null 2>&1 || { echo "需要安装 patch"; exit 1; }`
+1. **`hermes --version` 在 mirror pull 后仍显示 "X commits behind"** — 当使用 `git pull https://githubfast.com/... main`（中国镜像）更新时，HEAD 已经是最新的，但 `hermes --version` 的 "commits behind" 检查对比的是 `origin/main` tracking ref（指向 GitHub 原始仓库），而不是 FETCH_HEAD。所以版本信息仍显示落后。不影响实际运行（代码已更新），但会让用户困惑。修复：更新后执行 `git fetch origin` 同步 origin ref，或告知用户这是显示问题不影响功能。验证实际版本用 `git log --oneline -1`。
+
+2. **先查根因，再打补丁** — 用户教训：发现压缩模型上下文检测错误时，我直接加了 config 覆盖，用户问"为什么不去查查到底是什么模型、哪个供应商？"正确流程：先追踪实际调用链（provider/base_url/resolution chain），搞清楚错误值从哪来，再决定修法。config 覆盖是兜底手段，不是首选。
+
+2. **config 修改必须留注释** — 加 context_length 等显式覆盖时，必须用 YAML 注释说明原因和换模型时的操作，否则以后自己都忘了为什么加的。
+
+3. **`patch` 命令未安装** — restore-all.sh 会静默跳过所有 patch！阿里云 Linux 默认没有 `patch`。安装：`yum install -y patch`。restore 脚本应加依赖检查：`command -v patch >/dev/null 2>&1 || { echo "需要安装 patch"; exit 1; }`
 
 2. **`--forward` 静默跳过** — `patch -p1 --forward` 在上下文不匹配时直接跳过不报错。恢复后务必用 `git diff --stat` 确认改动行数与更新前一致。
 

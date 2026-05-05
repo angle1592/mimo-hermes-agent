@@ -743,6 +743,31 @@ Common gateway problems:
 - **Slack bot only works in DMs**: Must subscribe to `message.channels` event. Without it, the bot ignores public channels.
 - **Windows HTTP 400 "No models provided"**: Config file encoding issue (BOM). Ensure `config.yaml` is saved as UTF-8 without BOM.
 
+### Cron job sends no output (SILENT suppression)
+
+Cron job prompts include a system directive: `[SILENT]` suppresses delivery. If the agent decides there's nothing to report, it replies with `[SILENT]` and the user receives nothing — even though the job ran successfully (`last_status: ok`, `last_delivery_error: null`).
+
+**Symptoms:** User says "I didn't receive the cron job result" but `cronjob list` shows status `ok`.
+
+**Root cause:** The task's prompt or the system SILENT directive caused the agent to respond with `[SILENT]` instead of a visible report.
+
+**Fix — in the cron job prompt, explicitly override SILENT:**
+```
+无论是否有变动，都必须发送汇报。即使没有新内容，也要发一条简短确认。不要使用 [SILENT] 标记。
+```
+
+**User preference:** Daily/periodic jobs should **always deliver** a brief confirmation, even when there's nothing new. Silence is confusing — the user can't tell "nothing happened" from "the job failed silently".
+
+### Cron job design: check/report-only jobs
+
+For jobs that should only inspect and report (never modify anything), use this pattern:
+1. Prompt explicitly says "绝对不要执行 X，只做检查和汇报"
+2. Enable only `terminal` toolset (no `file`, no `memory`)
+3. Deliver to the standard DingTalk group
+4. Include a clear report format (e.g. "如果 X → 回复…；如果有更新 → 列出…")
+
+Example: Hermes update check (`git fetch` + `git log HEAD..FETCH_HEAD`), cookies expiry check, service health check.
+
 ### Pitfall: Investigate before patching config
 
 When Hermes reports a wrong value (e.g., incorrect context length, wrong model detection), **investigate the actual resolution chain first** before adding config overrides. The correct fix may be a one-line config change, but you need to understand *why* the auto-detection failed to pick the right fix.

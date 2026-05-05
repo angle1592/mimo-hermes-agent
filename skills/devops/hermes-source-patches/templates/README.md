@@ -28,6 +28,13 @@
 - **为什么**: Hermes 内置 TTS 不支持 xiaomi provider，MiMo TTS 用的是不同 API 格式
 - **用法**: 注册为 `xiaomi_tts` 工具，语音: 茉莉/冰糖/苏打/白桦/Mia/Chloe/Milo/Dean
 
+### 5. compression-context-provider-bug.md (config workaround, 非源码 patch)
+- **文件**: `~/.hermes/config.yaml` (auxiliary.compression.context_length)
+- **改了什么**: 显式指定压缩模型 context_length: 1000000，绕过自动检测
+- **为什么**: run_agent.py 传错 provider，OpenRouter 免费档返回 131K 阉割值
+- **详情**: `references/compression-context-provider-bug.md`
+- **注意**: 换压缩模型时需同步修改或删除此配置
+
 ## 注意事项
 
 - `__pycache__` 需要清理，否则旧 .pyc 可能覆盖新代码
