@@ -172,6 +172,7 @@ After creating, verify:
 4. **No tool mapping.** Abstract guidelines without `patch`/`todo`/`terminal` examples leave the user wondering how to apply them.
 5. **Platform-specific instructions.** Don't include install instructions for other platforms (Claude Code plugins, Cursor rules, VS Code extensions). Focus on what's relevant in Hermes.
 6. **Overwriting existing skills.** Before creating, `skills_list()` and check for overlap. Prefer patching an existing skill.
+7. **Ignoring user-specified sources.** When the user says "应该是X里的Y" or points to a specific repo/path, go DIRECTLY there. Don't waste time with broad GitHub/API searches that may find the wrong thing. The user often knows the ecosystem better than you. Verify the user's source first, then import. Only do broad searches when the user says "帮我找找" or has no specific source in mind.
 
 ## Verification Checklist
 
