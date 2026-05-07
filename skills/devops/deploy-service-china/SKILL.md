@@ -11,6 +11,7 @@ metadata:
     related_files:
       - references/sensenova-provider.md
       - references/repo-sync.md
+      - references/fastapi-mariadb.md
 ---
 
 # Deploy Services in China (Alibaba Cloud Linux)
@@ -145,9 +146,13 @@ If download is corrupted (Bus error, unexpected EOF), retry with a different pro
 
 ---
 
-## Step 3: Nginx Reverse Proxy
+## Step 3: Port Strategy & Nginx Reverse Proxy
 
-Alibaba Cloud security groups often block non-standard ports (8080, 3000, etc.). The safest approach: proxy through nginx on port 80.
+Alibaba Cloud security groups block non-standard ports by default. Two strategies:
+
+### Strategy A: Subpath on Port 80 (default, zero security-group changes)
+
+Best for: web UIs, services with static assets, when you don't want to bother the user.
 
 ```nginx
 # Add to existing server block or create new one
@@ -197,6 +202,53 @@ If the service has no base URL option, an alternative is to proxy at root (`loca
 `location /files/` + `proxy_pass http://127.0.0.1:8080/;` → `/files/foo` becomes `/foo` on backend.
 
 Match the backend's expected base URL.
+
+### Strategy B: Dedicated Port (cleaner for APIs)
+
+Best for: REST APIs, backend services without static assets, when cleaner separation is preferred.
+
+```bash
+# 1. Check which ports are already open from public IP
+curl -s --connect-timeout 3 -o /dev/null -w "%{http_code}" http://PUBLIC-IP:80/    # usually open
+curl -s --connect-timeout 3 -o /dev/null -w "%{http_code}" http://PUBLIC-IP:6080/  # if noVNC
+
+# 2. Ask user to open the desired port in Alibaba Cloud console
+#    (ECS → Security Groups → Inbound Rules → Add: TCP/PORT/0.0.0.0/0)
+
+# 3. After user opens port, verify:
+curl -s --connect-timeout 3 -o /dev/null -w "%{http_code}" http://PUBLIC-IP:NEW-PORT/
+# Expect: 200 (or non-timeout). If exit code 28 (timeout), still blocked.
+
+# 4. Nginx config for dedicated port (separate server block):
+```
+
+```nginx
+server {
+    listen NEW_PORT;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:BACKEND_PORT/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS for mobile apps
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+        if ($request_method = OPTIONS) {
+            return 204;
+        }
+    }
+}
+```
+
+**Decision tree:**
+- User can/will open port in security group? → Strategy B (dedicated port)
+- User doesn't want to touch security group? → Strategy A (subpath on 80)
+- Service has static assets that break with subpath? → Strategy B (or fix base URL)
 
 ---
 
@@ -351,7 +403,9 @@ Without mirrors, downloads frequently timeout or get connection-reset.
 2. **Docker CE repo `$releasever` mismatch** — Alibaba Cloud Linux 4 != CentOS 4. Hardcode to `9`.
 3. **Assuming Docker Hub pull works** — Often fails. Prefer direct binary download.
 4. **Direct GitHub download** — Too slow. Use `ghfast.top` or similar proxy.
-5. **Opening ports in security group** — You can't do this from the server. Use nginx reverse proxy on port 80 instead.
+5. **Opening ports in security group** — Can't be done from the server CLI, but the user can open ports via the Alibaba Cloud console. Two strategies (see Step 3 for decision framework):
+   - **Subpath on port 80** (default, zero-config): proxy via nginx, no security group change needed. Watch for base URL mismatches.
+   - **Dedicated port** (cleaner for APIs): user opens the port in security group console. Better separation, no path prefix issues. Verify with `curl -s --connect-timeout 3 -o /dev/null -w "%{http_code}" http://PUBLIC-IP:PORT/` from the server — timeout (exit code 28) = blocked by security group.
 6. **Telling user it works without testing** — Always curl localhost first, then curl public IP.
 7. **Weak default passwords** — Some tools require 12+ char passwords (e.g., FileBrowser v2.63+).
 
@@ -361,6 +415,7 @@ Without mirrors, downloads frequently timeout or get connection-reset.
 
 | Service | Binary Source | Default Port | Notes |
 |---------|--------------|-------------|-------|
+| FastAPI + MariaDB | pip + system MariaDB | 8000 | See `references/fastapi-mariadb.md` for full pattern incl. OneNET auth pitfalls |
 | FileBrowser | GitHub release | 8080 | Go binary, ~30MB, very lightweight. See `references/filebrowser.md` |
 | Alist | GitHub release | 5244 | Can mount cloud storage |
 | Uptime Kuma | Docker | 3001 | Node.js, needs more RAM |
