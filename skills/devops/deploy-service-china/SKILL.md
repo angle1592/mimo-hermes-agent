@@ -233,14 +233,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # CORS for mobile apps
-        add_header Access-Control-Allow-Origin * always;
-        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
-        if ($request_method = OPTIONS) {
-            return 204;
-        }
     }
 }
 ```
@@ -397,6 +389,43 @@ Without mirrors, downloads frequently timeout or get connection-reset.
 
 ---
 
+### Pitfall: Duplicate CORS Headers Breaks Browser Requests
+
+If the backend framework (FastAPI, Express, etc.) already has its own CORS middleware (e.g., FastAPI's `CORSMiddleware`), do **NOT** also add CORS headers in nginx. Browsers reject responses with duplicate `Access-Control-Allow-Origin` headers, causing `TypeError: Failed to fetch` even though curl/Python scripts work fine (they don't enforce CORS).
+
+**Symptoms:**
+- `curl -i` shows `Access-Control-Allow-Origin: *` appearing twice
+- Browser console: `TypeError: Failed to fetch`
+- curl / Python test scripts work normally
+
+**Fix:** Remove all `add_header Access-Control-Allow-*` and `if ($request_method = OPTIONS)` blocks from nginx. Let the backend's CORS middleware handle it exclusively.
+
+```nginx
+# WRONG — nginx + backend both add CORS headers → duplicate
+location / {
+    proxy_pass http://127.0.0.1:8000/;
+    add_header Access-Control-Allow-Origin * always;       # ← REMOVE
+    add_header Access-Control-Allow-Methods "..." always;  # ← REMOVE
+    if ($request_method = OPTIONS) { return 204; }         # ← REMOVE
+}
+
+# RIGHT — only nginx proxy, backend handles CORS
+location / {
+    proxy_pass http://127.0.0.1:8000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Verification:**
+```bash
+# Should show Access-Control-Allow-Origin exactly ONCE
+curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint -o /dev/null \
+  | grep -i "access-control-allow-origin"
+```
+
 ## Common Pitfalls
 
 1. **Using `get.docker.com` install script** — Blocked in China. Use Alibaba Cloud mirror repo.
@@ -408,6 +437,7 @@ Without mirrors, downloads frequently timeout or get connection-reset.
    - **Dedicated port** (cleaner for APIs): user opens the port in security group console. Better separation, no path prefix issues. Verify with `curl -s --connect-timeout 3 -o /dev/null -w "%{http_code}" http://PUBLIC-IP:PORT/` from the server — timeout (exit code 28) = blocked by security group.
 6. **Telling user it works without testing** — Always curl localhost first, then curl public IP.
 7. **Weak default passwords** — Some tools require 12+ char passwords (e.g., FileBrowser v2.63+).
+8. **Duplicate CORS headers** — If backend has CORS middleware (FastAPI CORSMiddleware, Express cors()), do NOT also add CORS headers in nginx. Browsers reject duplicate `Access-Control-Allow-Origin` → `TypeError: Failed to fetch`. curl works fine because it doesn't enforce CORS. Remove nginx CORS, let backend handle it.
 
 ---
 
@@ -429,6 +459,34 @@ For 2C2G machines, prefer Go binaries over Docker/Node.js services.
 ## Post-Incident Diagnostics
 
 If the server became unresponsive or was hard-rebooted, see `references/server-diagnostics.md` for the investigation workflow (journal forensics, OOM detection, crash cause triage).
+
+## Test Data Generation
+
+Generate realistic posture monitoring data with `scripts/seed-posture-data.py`:
+
+```bash
+# 7-day reminder-aware data (default, best for demos with alert features)
+python3 scripts/seed-posture-data.py --days 7 --sql-file /tmp/seed.sql
+mysql -u root < /tmp/seed.sql
+
+# 3-week data with ratio mode (continuous abnormal posture)
+python3 scripts/seed-posture-data.py --days 21 --mode ratio --sql-file /tmp/seed.sql
+
+# Custom range
+python3 scripts/seed-posture-data.py --days 14 --start-date 2026-05-01 --sql-file /tmp/seed.sql
+```
+
+Two modes:
+- **`--mode reminder`** (default): Episode-based. Abnormal posture happens in short bursts (30-60s each), simulating a system with posture alerts. Realistic: ~15-45 reminders/day in week 1, dropping to ~5-15 in week 3. Best for defense demos with reminder functionality.
+- **`--mode ratio`**: Continuous ratio-based. Each record randomly picks posture type based on weekly ratios. Produces more abnormal records (~1000+/day). Better for showing dramatic score differences (55→85).
+
+Both modes simulate a student's daily schedule with weekday/weekend differences and fatigue-based degradation.
+- **Week 1 (初始)**: score ~55-65, daily abnormal ~2.5h — poor posture habits
+- **Week 2 (改善)**: score ~65-75, daily abnormal ~1.5h — gradual improvement
+- **Week 3 (习惯养成)**: score ~75-85, daily abnormal ~50min — good habits formed
+- **Weekday vs weekend**: different wake times, posture distributions, outdoor periods
+- **Fatigue model**: hunchback probability increases with awake hours
+- Each day produces meaningfully different data (not copy-paste)
 
 ## Filesystem Cleanup
 

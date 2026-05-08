@@ -55,6 +55,16 @@ EOF
 
 5. **Address binding** — Set `"address": "127.0.0.1"` when behind nginx. Don't expose port directly.
 
+## File Delivery (User Preference)
+
+FileBrowser is the designated file sharing method for this server. When the agent needs to deliver a file to the user:
+1. Copy to `/srv/filebrowser/shared/` (organize into subdirectories by topic)
+2. Give user the link: `http://YOUR_SERVER_IP/files/<path>`
+3. Do NOT spin up temporary HTTP servers or other ad-hoc file sharing
+4. Clean up stale/unused files from the shared directory
+
+WeChat `MEDIA:` is the alternative for direct file sending.
+
 ## Nginx Config
 
 ```nginx

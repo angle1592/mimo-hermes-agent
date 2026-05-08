@@ -131,6 +131,10 @@ location /api/ {
 }
 ```
 
+### Pitfall: No CORS Headers in Nginx When FastAPI Has CORSMiddleware
+
+FastAPI's `CORSMiddleware` already handles CORS (origin, methods, headers, preflight). Do NOT add `add_header Access-Control-Allow-*` in nginx — browsers reject responses with duplicate CORS headers. See the main SKILL.md "Duplicate CORS Headers" pitfall for details.
+
 ## Testing Checklist
 
 ```bash
@@ -150,13 +154,16 @@ curl -s http://PUBLIC-IP/api/posture/latest
 For IoT/monitoring projects, use `scripts/seed-posture-data.py` to generate realistic test data:
 
 ```bash
-# Generate and insert directly
-python3 ~/.hermes/skills/devops/deploy-service-china/scripts/seed-posture-data.py --days 7 \
-  | mysql -u posture_user -p'PASS' -h 127.0.0.1 posture_monitor
+# 3-week demo data with improvement arc (best for defense demos)
+python3 ~/.hermes/skills/devops/deploy-service-china/scripts/seed-posture-data.py \
+  --days 21 --sql-file /tmp/seed.sql
+mysql -u root < /tmp/seed.sql
 
-# Or write to file first for review
-python3 scripts/seed-posture-data.py --days 14 -o /tmp/seed.sql
+# Custom range
+python3 scripts/seed-posture-data.py --days 14 --start-date 2026-05-01 -o /tmp/seed.sql
 ```
+
+The script generates a **3-week improvement trend** (score 55→75→85), making it ideal for thesis defense presentations. Each day has unique posture distributions, weekday/weekend differences, and fatigue-based degradation.
 
 ## Common FastAPI Patterns Used
 
@@ -180,14 +187,50 @@ app = FastAPI(lifespan=lifespan)
 ```python
 import httpx
 
+THINGMODEL_BASE = "https://iot-api.heclouds.com/thingmodel"
+
+def _headers():
+    return {"authorization": settings.onenet_token, "Content-Type": "application/json"}
+
 async def query_device_properties():
+    """查询设备最新全部属性 (GET)."""
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            "https://iot-api.heclouds.com/thingmodel/query-device-property",
+            f"{THINGMODEL_BASE}/query-device-property",
             params={"product_id": pid, "device_name": name},
-            headers={"authorization": token},
+            headers=_headers(),
         )
         return resp.json().get("data", [])
+
+async def set_device_property(params: dict) -> dict:
+    """向设备下发属性设置指令 (POST).
+
+    OneNET API: POST /thingmodel/set-device-property
+    Returns {"ok": bool, "code": int, "msg": str}
+    """
+    payload = {"product_id": pid, "device_name": name, "params": params}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{THINGMODEL_BASE}/set-device-property",
+            json=payload, headers=_headers(),
+        )
+        body = resp.json()
+    code = body.get("code", -1)
+    if code == 0:
+        return {"ok": True, "code": 0}
+    return {"ok": False, "code": code, "msg": body.get("msg", "")}
+```
+
+### Pitfall: FastAPI `HTTPException` with dict detail
+
+When returning structured error info via `raise HTTPException(400, detail={...})`, the `detail` must be passed as a keyword argument. Passing the dict positionally works but is fragile:
+
+```python
+# WRONG — positional, hard to read
+raise HTTPException(400, {"ok": False, "code": code, "msg": msg})
+
+# RIGHT — explicit keyword
+raise HTTPException(400, detail={"ok": False, "code": code, "msg": msg})
 ```
 
 ### Pitfall: OneNET Authentication — Device Token ≠ API Token
