@@ -64,6 +64,21 @@ pip install -r requirements.txt
 
 If using APScheduler 3.x with `AsyncIOScheduler`, ensure the sync function is `async` and uses `httpx.AsyncClient`. Mixing sync `requests` in an async scheduler blocks the event loop.
 
+### Pitfall: APScheduler Interval — Check the Actual Code, Not Just Comments
+
+The `scheduler.add_job(..., seconds=N)` value is what controls the interval, NOT the docstring or log message. In the posture-monitor project, the docstring said "每 10 秒" but the actual code was `seconds=1`. When changing the polling interval, update **both** the `seconds=` parameter and the surrounding comments/log messages to stay in sync.
+
+```python
+# WRONG — comment says 10s but code says 1s
+"""每 10 秒从 OneNET 拉取"""
+scheduler.add_job(sync_once, "interval", seconds=1, ...)  # ← actual is 1s!
+
+# RIGHT — comment, code, and log all match
+"""每 10 秒从 OneNET 拉取"""
+scheduler.add_job(sync_once, "interval", seconds=10, ...)
+logger.info("[Sync] Background sync started (interval=10s)")
+```
+
 ## Step 3: Environment Config
 
 ```bash
@@ -221,6 +236,26 @@ async def set_device_property(params: dict) -> dict:
     return {"ok": False, "code": code, "msg": body.get("msg", "")}
 ```
 
+### Pitfall: Missing `__init__.py` After Git Reset
+
+When doing `git reset --hard` to a commit that removed the server directory, Python module files (`__init__.py`, `main.py`, service files) are lost. The app fails to start with:
+
+```
+ERROR: Error loading ASGI app. Could not import module "app.main"
+```
+
+**Fix:** Restore the missing module files from the old commit:
+
+```bash
+cd /path/to/repo
+git checkout OLD_COMMIT -- server/app/__init__.py server/app/main.py \
+  server/app/routers/__init__.py server/app/services/__init__.py server/app/services/onenet.py
+rm -rf server/app/__pycache__ server/app/routers/__pycache__ server/app/services/__pycache__
+systemctl restart posture-monitor.service
+```
+
+**General pattern:** When selectively re-adding files to a reset branch, always check that the Python module structure is complete (`__init__.py` in every package directory, `main.py` for the app entry point, and any imports the added files depend on).
+
 ### Pitfall: FastAPI `HTTPException` with dict detail
 
 When returning structured error info via `raise HTTPException(400, detail={...})`, the `detail` must be passed as a keyword argument. Passing the dict positionally works but is fragile:
@@ -288,6 +323,89 @@ except (ValueError, TypeError):
 | `fillLightOn` | `fill_light_on` | str→bool | `"true"`/`"false"` |
 
 Boolean values may also arrive as strings `"true"`/`"false"` — handle both cases.
+
+## Session-Based Duration Calculation (good_posture_minutes)
+
+The naive approach (`record_count * 10 / 60`) produces unrealistic durations (900+ minutes/day) because simulated data has no gaps. Real posture monitoring is intermittent — users sit for 1-2 hour sessions with breaks.
+
+**Algorithm:**
+1. Filter: only `person_present=true` with scored posture types (`normal`, `head_down`, `hunchback`)
+2. Sort by `onenet_time`
+3. Split into sessions: gap > 5 minutes between consecutive records = new session
+4. Session duration = `last_record.time - first_record.time` (min: `record_count * 10s`)
+5. `good_minutes = sum(session_duration * healthy_count / scored_count)` for each session
+
+**Why 5 minutes?** Short enough to catch real breaks (bathroom, coffee), long enough to not split a continuous study session due to occasional network hiccups.
+
+**Effect:**
+- 100 records across 8h → ~4h session → ~2-3h good minutes (reasonable)
+- Continuous 16h simulated data → 1 session → ~972 minutes (data problem, not algorithm)
+- Real device data with natural breaks → multiple short sessions → realistic totals
+
+```python
+# Key code pattern in daily_stats:
+SESSION_GAP_MINUTES = 5
+sessions = [[records[0]]]
+for r in records[1:]:
+    gap = (r.onenet_time - sessions[-1][-1].onenet_time).total_seconds()
+    if gap > SESSION_GAP_MINUTES * 60:
+        sessions.append([])
+    sessions[-1].append(r)
+```
+
+## Health Score Algorithm & Targeted Data Insertion
+
+The posture monitor calculates `health_score` as:
+
+```
+score = round(normal_count / (normal_count + head_down_count + hunchback_count) * 100)
+```
+
+**Key:** `no_person` and `unknown` posture types are **excluded** from the score calculation (they don't count toward the denominator). Only `normal`, `head_down`, and `hunchback` matter.
+
+### Quick Score Reference
+
+| Target Score | normal | head_down | hunchback | Total scored |
+|---|---|---|---|---|
+| 50 | 50 | 25 | 25 | 100 |
+| 60 | 60 | 20 | 20 | 100 |
+| 70 | 70 | 20 | 10 | 100 |
+| 80 | 80 | 10 | 10 | 100 |
+| 90 | 90 | 5 | 5 | 100 |
+
+### Direct SQL Insertion for Exact Scores
+
+When the seed script's improvement arc (55→75→85) doesn't fit and you need exact scores for specific dates, insert directly via SQL:
+
+```python
+# Generate records spaced ~10s apart starting at 08:00
+# For score 70: 70 normal + 20 head_down + 10 hunchback
+def gen_records(date, normal_n, down_n, hunch_n):
+    types = ["normal"] * normal_n + ["head_down"] * down_n + ["hunchback"] * hunch_n
+    interval = max(10, 28800 // len(types))  # spread across 8h
+    rows = []
+    for i, pt in enumerate(types):
+        secs = 8 * 3600 + i * interval
+        h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
+        ts = f"{date} {h:02d}:{m:02d}:{s:02d}"
+        rows.append(f"('main','{pt}',1,{300 + (i%5)*50},0,'{ts}','{ts}')")
+    return rows
+```
+
+```bash
+# Insert via mysql CLI (use root — no password on socket)
+mysql -u root -e "INSERT IGNORE INTO posture_monitor.posture_records \
+  (device_id,posture_type,person_present,ambient_lux,fill_light_on,onenet_time,created_at) \
+  VALUES ('main','normal',1,350,0,'2026-05-10 08:00:00','2026-05-10 08:00:00'),(...);"
+
+# Verify via API
+curl -s http://127.0.0.1:8000/api/posture/stats/daily?date=2026-05-10
+# → {"good_posture_minutes":12,"abnormal_count":30,"health_score":70}
+```
+
+**Pitfall:** Use `INSERT IGNORE` because the table has a `UniqueConstraint("device_id", "onenet_time")` — duplicate timestamps silently skip instead of erroring.
+
+**Pitfall:** Use `mysql -u root` (no `-p`) for local socket auth. The `posture_user` account is bound to `'127.0.0.1'` (TCP only), so `mysql -u posture_user -p'pass'` without `-h 127.0.0.1` fails with "Access denied".
 
 ## Troubleshooting: OneNET Auth Failures
 
