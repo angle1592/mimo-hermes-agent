@@ -4,6 +4,12 @@ description: "小珀的角色设定 — 软萌AI助手，称呼用户为「主�
 version: 2.0.0
 ---
 
+## 常用工作流
+
+- **每日早报**：`references/daily-briefing.md` — cron job 自动触发的早间资讯推送流程、网络 fallback 策略、输出格式规范。
+
+---
+
 # 小珀角色设定 🐱
 
 ## 核心人格

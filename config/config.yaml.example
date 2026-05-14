@@ -22,6 +22,7 @@ agent:
   gateway_notify_interval: 180
   gateway_auto_continue_freshness: 3600
   image_input_mode: auto
+  disabled_toolsets: []
   reasoning_effort: xhigh
 terminal:
   backend: local
@@ -37,12 +38,14 @@ terminal:
   singularity_image: docker://nikolaik/python-nodejs:python3.11-nodejs20
   modal_image: nikolaik/python-nodejs:python3.11-nodejs20
   daytona_image: nikolaik/python-nodejs:python3.11-nodejs20
+  vercel_runtime: node24
   container_cpu: 1
   container_memory: 5120
   container_disk: 51200
   container_persistent: true
   docker_volumes: []
   docker_mount_cwd_to_workspace: false
+  docker_run_as_host_user: false
   persistent_shell: true
 browser:
   inactivity_timeout: 120
@@ -67,6 +70,17 @@ tool_output:
   max_bytes: 50000
   max_lines: 2000
   max_line_length: 2000
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
 compression:
   enabled: true
   threshold: 0.5
@@ -75,6 +89,9 @@ compression:
   hygiene_hard_message_limit: 400
 prompt_caching:
   cache_ttl: 5m
+openrouter:
+  response_cache: true
+  response_cache_ttl: 300
 bedrock:
   region: ''
   discovery:
@@ -107,11 +124,9 @@ auxiliary:
     model: deepseek-v4-pro
     base_url: ''
     api_key: ""
-    # 显式指定上下文长度，避免自动检测误取 OpenRouter 免费档的 131K
-    # 换模型时记得同步修改或删除此行
-    context_length: 1000000
     timeout: 120
     extra_body: {}
+    context_length: 1000000
   session_search:
     provider: deepseek
     model: deepseek-v4-flash
@@ -148,11 +163,19 @@ auxiliary:
     api_key: ""
     timeout: 30
     extra_body: {}
+  curator:
+    provider: auto
+    model: ''
+    base_url: ''
+    api_key: ""
+    timeout: 600
+    extra_body: {}
 display:
   compact: false
   personality: kawaii
   resume_display: full
   busy_input_mode: interrupt
+  tui_auto_resume_recent: false
   bell_on_complete: false
   show_reasoning: true
   streaming: false
@@ -160,6 +183,7 @@ display:
   inline_diffs: true
   show_cost: false
   skin: default
+  tui_status_indicator: kaomoji
   user_message_preview:
     first_lines: 2
     last_lines: 2
@@ -167,6 +191,7 @@ display:
   tool_progress_command: false
   tool_progress_overrides: {}
   tool_preview_length: 0
+  ephemeral_system_ttl: 0
   platforms: {}
   runtime_footer:
     enabled: false
@@ -174,6 +199,7 @@ display:
     - model
     - context_pct
     - cwd
+  copy_shortcut: auto
 dashboard:
   theme: midnight
 privacy:
@@ -201,6 +227,8 @@ tts:
     ref_text: ''
     model: neuphonic/neutts-air-q4-gguf
     device: cpu
+  piper:
+    voice: en_US-lessac-medium
 stt:
   enabled: true
   provider: local
@@ -229,7 +257,7 @@ memory:
   user_profile_enabled: true
   memory_char_limit: 2200
   user_char_limit: 1375
-  provider: ''
+  provider: mem0
 delegation:
   model: deepseek-v4-pro
   provider: deepseek
@@ -244,6 +272,8 @@ delegation:
   orchestrator_enabled: true
   subagent_auto_approve: false
 prefill_messages_file: ''
+goals:
+  max_turns: 20
 skills:
   external_dirs: []
   template_vars: true
@@ -262,6 +292,15 @@ skills:
     - systematic-debugging
     - test-driven-development
     - writing-plans
+curator:
+  enabled: true
+  interval_hours: 168
+  min_idle_hours: 2
+  stale_after_days: 30
+  archive_after_days: 90
+  backup:
+    enabled: true
+    keep: 5
 honcho: {}
 timezone: ''
 discord:
@@ -284,6 +323,7 @@ approvals:
   mode: false
   timeout: 60
   cron_mode: deny
+  mcp_reload_confirm: true
 command_allowlist:
 - stop/restart hermes gateway (kills running agents)
 - copy/move file into /etc/
@@ -309,6 +349,9 @@ security:
 cron:
   wrap_response: true
   max_parallel_jobs: null
+kanban:
+  dispatch_in_gateway: true
+  dispatch_interval_seconds: 60
 code_execution:
   mode: project
 logging:
@@ -334,13 +377,14 @@ onboarding:
 updates:
   pre_update_backup: false
   backup_keep: 5
+_config_version: 23
 platforms:
   dingtalk:
     enabled: true
     home_channel:
       platform: dingtalk
       chat_id: REDACTED
-      name: 星际娱乐和平公司
+      name: "\u661F\u9645\u5A31\u4E50\u548C\u5E73\u516C\u53F8"
     extra:
       client_id: dinguj38jyamwnlu8y0e
       client_secret: REDACTED

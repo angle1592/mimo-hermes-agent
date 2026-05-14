@@ -768,6 +768,34 @@ For jobs that should only inspect and report (never modify anything), use this p
 
 Example: Hermes update check (`git fetch` + `git log HEAD..FETCH_HEAD`), cookies expiry check, service health check.
 
+### Pitfall: Memory tool unavailable in cron jobs
+
+The cron scheduler **hardcodes `skip_memory=True`** when creating agent instances for cron jobs (source: `cron/scheduler.py`, line ~1219). This has been in place since **v2026.4.3** (commit `924bc67eee`, April 2 2026). The `memory` tool is **always disabled** in cron sessions, regardless of the job's `enabled_toolsets` setting.
+
+**Symptoms:** A cron job with `enabled_toolsets: ["memory"]` gets "Memory is not available. It may be disabled in config or this environment." when trying to use the memory tool.
+
+**Root cause:** `AIAgent(skip_memory=True)` is passed for all cron runs. The comment in code says: *"Cron system prompts would corrupt user representations."* The cron system prompt differs from normal user conversations, so allowing memory writes would inject incorrect context. When `skip_memory=True`, `self._memory_store` stays `None` — the `memory_tool()` handler returns the error immediately when `store is None`.
+
+**Why it sometimes "works" then breaks:** LLMs are non-deterministic. The model may silently bypass the broken `memory` tool and use `read_file`/`write_file` to directly access `~/.hermes/memories/MEMORY.md` and `USER.md`. This works for a while, then the model's behavior shifts and it starts trying the `memory` tool directly — hitting the error. **This is not a version regression**, it's LLM variance. A cron job that successfully maintained memory for weeks can suddenly stop working without any code change.
+
+**Confirmed timeline (v2026.4.30):** A daily memory cleanup cron job worked reliably from Apr 29 → May 12 using `read_file`/`write_file` (the model listed exact entry counts like "13条 → 13条"). On May 13 it broke — the model tried the `memory` tool, got "Memory is not available", and reported failure. No code change, no Hermes update, no config change. Pure LLM behavior drift.
+
+**Hermes has no built-in memory cleanup/organization feature.** `hermes memory` only has `setup`, `status`, `off`, `reset` (nuclear). The memory tool only supports `add`/`replace`/`remove`. If the user wants periodic memory maintenance, it must be done via interactive sessions or via a cron job that uses `read_file`/`write_file` (unreliable) or a reminder cron that prompts the user to do it manually.
+
+**Diagnosis:** Check cron output history at `~/.hermes/cron/output/{job_id}/`. If reports switch between "successfully reviewed N entries" and "memory not available", the model is inconsistently choosing its access path.
+
+**For a full comparison of memory management approaches** (built-in, external providers, cron-based DIY), see `references/memory-management-approaches.md`.
+
+**Fix options (pick one):**
+
+1. **Rewrite the cron prompt to explicitly instruct file access** — tell the model to use `read_file`/`write_file` on `~/.hermes/memories/MEMORY.md` and `~/.hermes/memories/USER.md`. Still unreliable long-term due to LLM non-determinism.
+
+2. **Stop running memory-maintenance as a cron job** — do it manually during interactive sessions, or create a reminder cron job that tells you to run cleanup yourself.
+
+3. **Patch the source** (requires user approval) — remove `skip_memory=True` from `cron/scheduler.py` line ~1219. Risk: cron system prompts may write misleading entries to memory. Must save patch via `hermes-source-patches` skill.
+
+4. **Use an external memory provider** (recommended) — Mem0, Honcho, or Hindsight handle extraction, deduplication, and cleanup automatically on session end. No cron job needed. Setup: `hermes memory setup`.
+
 ### Pitfall: Investigate before patching config
 
 When Hermes reports a wrong value (e.g., incorrect context length, wrong model detection), **investigate the actual resolution chain first** before adding config overrides. The correct fix may be a one-line config change, but you need to understand *why* the auto-detection failed to pick the right fix.
