@@ -1,6 +1,6 @@
 # 自定义源码修改记录
 
-> 更新 Hermes 后运行: `bash ~/.hermes/patches/restore-all.sh`
+> 更新 Hermes 后运行: `bash ~/.hermes/skills/devops/hermes-source-patches/scripts/restore-all.sh`
 > 详细说明见各 patch 文件头部注释。
 
 ## 修改清单
@@ -11,11 +11,11 @@
 - **为什么**: 默认 webhook 只能被动回复，无法主动发消息给群
 - **流程**: client_id/client_secret → OAuth token → POST /v1.0/robot/groupMessages/send，失败回退 webhook
 
-### 2. weixin-markdown-conversion.patch
+### 2. weixin-markdown-passthrough.patch
 - **文件**: `gateway/platforms/weixin.py`
-- **改了什么**: 新增 `_convert_markdown_for_weixin()` 函数，`format_message()` 从 `_normalize_markdown_blocks` 改为调用它
-- **为什么**: 微信 iLink Bot API 不支持 Markdown 渲染，发出去会显示原始语法符号
-- **转换规则**: #→【】、**→去除、`→「」、- →·、>→│、表格→列表、链接→text (url)
+- **改了什么**: `format_message()` 从上游的格式转换管线改为直接 `return content`（原样透传）
+- **为什么**: 微信已原生支持 Markdown 渲染，不需要再转换
+- **注意**: 上游的格式管线一直在演变（v0.12: `_convert_markdown_for_weixin`，v0.13: `_wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(...))`），每次更新需检查 `format_message()` 的当前状态
 
 ### 3. delegate-tool.patch
 - **文件**: `tools/delegate_tool.py`
@@ -40,3 +40,4 @@
 - `__pycache__` 需要清理，否则旧 .pyc 可能覆盖新代码
 - patch 可能和新版冲突，恢复时注意看输出
 - 如果 patch 失败，手动检查: `cd /usr/local/lib/hermes-agent && git diff`
+- 手动修复冲突后必须重新生成 .patch 文件，否则下次恢复会再次失败

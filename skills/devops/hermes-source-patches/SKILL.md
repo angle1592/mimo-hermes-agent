@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）和 `references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）和 `references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -128,6 +128,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 3. **行号偏移** — 上游新增代码会导致 patch 的行号偏移，但 `patch` 会自动用上下文匹配（`offset N lines`）。只要上下文没变就能自动适配。
 
 4. **stash 不是 source of truth** — `git stash` 里的旧改动可能与新版冲突。patches 目录才是权威来源。stash 确认 patches 恢复成功后应立即 drop。
+
+4. **手动修复冲突后必须重新生成 patch 文件** — `restore-all.sh` 失败的 hunk 需要手动修复，修复后旧的 .patch 文件已经过时（上下文行号、函数签名都可能变了）。必须立即 `git diff <file> > references/<name>.patch` 更新 patch 文件，否则下次恢复会再次失败。v0.13.0 更新时 weixin.py 和 delegate_tool.py 都遇到了这个问题。
 
 5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
 
