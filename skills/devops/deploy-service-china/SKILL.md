@@ -12,6 +12,7 @@ metadata:
       - references/sensenova-provider.md
       - references/repo-sync.md
       - references/fastapi-mariadb.md
+      - references/cloakbrowser-install.md
 ---
 
 # Deploy Services in China (Alibaba Cloud Linux)
@@ -451,6 +452,7 @@ curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint 
 | Uptime Kuma | Docker | 3001 | Node.js, needs more RAM |
 | Gitea | GitHub release | 3000 | Self-hosted Git |
 | wechat-reader | GitHub clone | 9222 (CDP) | WeChat article reader. See `references/wechat-reader.md` |
+| CloakBrowser | pip + GitHub binary | N/A | Stealth Chromium for automation. See `references/cloakbrowser-install.md` |
 
 For 2C2G machines, prefer Go binaries over Docker/Node.js services.
 
