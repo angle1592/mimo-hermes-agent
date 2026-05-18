@@ -82,7 +82,7 @@ All set in `~/.hermes/.env`:
 | Feature | DingTalk | Weixin |
 |---------|----------|--------|
 | Auth | AppKey + AppSecret | QR code scan |
-| Voice support | ❌ | ✅ (MEDIA_VOICE) |
+| Voice support | ❌ | ⚠️ Inbound ✅ / Outbound → file attachment (see below) |
 | Image support | Via link | ✅ Native |
 | File support | ❌ | ✅ Native |
 | Platform | Enterprise only | Personal accounts |
@@ -240,6 +240,7 @@ See `references/weixin-markdown-rendering.md` for investigation notes.
 
 ## Troubleshooting
 
+- **Audio files sent as download attachments, not inline playable** — WeChat can't play audio inline as a native voice bubble. The `send_voice()` method in `weixin.py` falls back to `_send_file(force_file_attachment=True)` because native outbound voice bubbles are not proven-working in the iLink API. Workaround: host the audio file on nginx and share the URL. The server has a `/audio/` path with `alias` directive and `auth_basic off` — copy to `/usr/share/nginx/html/audio/` and share `http://<server_ip>/audio/<filename>`. Alternatively, FileBrowser at `http://<server_ip>/files/` also works for file sharing (proxied through nginx to port 8080).
 - **"Weixin adapter import failed"** → Missing `aiohttp` or `cryptography`. Install with pip.
 - **QR login timeout** — Re-run `hermes gateway setup` and scan quickly (QR expires ~35s).
 - **Session expired (errcode -14)** — Re-login via `hermes gateway setup` → Weixin.
@@ -254,5 +255,5 @@ When a user asks "what does this do / will it affect my groups / how do I intera
 
 - **Purpose**: The logged-in WeChat account becomes the bot's identity. Messages sent to that account are processed by Hermes, and replies appear as that account sending.
 - **Existing group chats**: Depends on group policy config. Set to "disabled" → existing groups are completely unaffected. Set to "@mention" → bot only responds when @mentioned in groups.
-- **Interaction**: People send messages to the WeChat account → Hermes auto-replies. The account owner can also chat with the bot directly via DM. Voice messages work natively (unlike DingTalk).
+- **Interaction**: People send messages to the WeChat account → Hermes auto-replies. The account owner can also chat with the bot directly via DM. Voice messages work natively for **receiving** (unlike DingTalk). **Sending** voice falls back to file attachment — native outbound voice bubbles are not proven-working in the iLink API (see `send_voice()` in `weixin.py`).
 - **Phone WeChat still works**: iLink Bot login is like a multi-device session (similar to iPad/desktop). Your phone WeChat continues normally.

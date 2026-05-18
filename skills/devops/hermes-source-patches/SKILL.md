@@ -154,6 +154,70 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 
 **不要每次都读 README**——随着 README 增大会浪费上下文。记忆只放指针，skill 放流程，README 放详情。
 
+## Xiaomi TTS 调用 Pitfall
+
+`xiaomi_tts_tool.py` 通过 `os.getenv("XIAOMI_API_KEY")` 读取密钥。该密钥存储在 `~/.hermes/.env` 中，但 **不会自动注入到 terminal/execute_code 的子进程环境**。直接在 Python 脚本中 import 调用会返回 `"XIAOMI_API_KEY not configured"`。
+
+**正确做法：** 在 terminal 命令中先 export 环境变量：
+```bash
+source ~/.hermes/.env
+# 然后再调用 python 脚本
+```
+或者在 execute_code 中手动 `os.environ["XIAOMI_API_KEY"] = ...`。
+
+### 可用声音
+
+| 声音 | 性别 | 特点 |
+|------|------|------|
+| 茉莉 | 女 | 默认，标准中文女声 |
+| 冰糖 | 女 | 偏甜美 |
+| 苏打 | 女 | - |
+| Mia | 女 | 英文向 |
+| Chloe | 女 | 英文向，中文也能读但口音偏西 |
+| 白桦 | 男 | - |
+| Milo | 男 | - |
+| Dean | 男 | - |
+
+### style 参数（mimo-v2.5-tts）
+
+普通模型支持 `style` 参数作为"导演指令"，控制语气/情感。示例：
+- `用温柔甜美的语气说` — 更柔和
+- `用轻松自然、像朋友聊天一样的语气说` — 去掉播音腔
+- `用活泼俏皮的语气说` — 更有活力
+
+style 越具体，效果越明显。但不要写太长，一句话即可。
+
+### voicedesign 模型（mimo-v2.5-tts-voicedesign）
+
+用文字描述生成全新音色，不需要预设声音。**但有两个坑：**
+
+1. **不接受 `audio.voice` 参数** — 传了会返回 400：`audio.voice is not supported for voice design model`
+2. **user message 必须非空** — 音色描述放在 `user` message 的 `content` 里，待合成文本放 `assistant` message
+
+```python
+# 正确调用方式
+completion = client.chat.completions.create(
+    model='mimo-v2.5-tts-voicedesign',
+    messages=[
+        {'role': 'user', 'content': '一个20岁左右的中国女生，声音温柔甜美，语速适中'},
+        {'role': 'assistant', 'content': '你好呀，很高兴认识你！'}
+    ],
+    audio={'format': 'mp3'}  # 不要加 voice！
+)
+```
+
+**voiceclone 模型**（mimo-v2.5-tts-voiceclone）需要上传参考音频样本，未在 Hermes 工具中集成。
+
+## 静态文件托管（本服务器）
+
+音频/文件可通过 nginx `/audio/` 路径对外提供：
+- 目录: `/usr/share/nginx/html/audio/`
+- URL: `http://YOUR_SERVER_IP/audio/`
+- 无需认证 (`auth_basic off`)
+- TTS 试听页: `/usr/share/nginx/html/audio/tts/index.html`
+
+FileBrowser (`/files/` 路径) 偶尔出现 404 问题，重要静态文件优先放 `/audio/` 目录。
+
 ## 迁移机会
 
 新版 v0.12.0 的 TTS 支持 `tts.providers.<name>` command-type provider（config.yaml 中配置 shell 命令）。`xiaomi_tts_tool.py` 未来可以迁移到这个架构，就不需要维护源码 patch 了。
