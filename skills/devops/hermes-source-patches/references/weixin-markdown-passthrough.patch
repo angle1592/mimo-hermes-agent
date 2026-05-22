@@ -1,5 +1,5 @@
 diff --git a/gateway/platforms/weixin.py b/gateway/platforms/weixin.py
-index 1c9fec0af..a78c3aa7b 100644
+index 1c9fec0af..239b1fcba 100644
 --- a/gateway/platforms/weixin.py
 +++ b/gateway/platforms/weixin.py
 @@ -914,6 +914,128 @@ def _pack_markdown_blocks_for_weixin(content: str, max_length: int) -> List[str]
@@ -131,13 +131,12 @@ index 1c9fec0af..a78c3aa7b 100644
  def _split_text_for_weixin_delivery(
      content: str, max_length: int, split_per_line: bool = False,
  ) -> List[str]:
-@@ -2065,7 +2187,8 @@ class WeixinAdapter(BasePlatformAdapter):
+@@ -2065,7 +2187,7 @@ class WeixinAdapter(BasePlatformAdapter):
      def format_message(self, content: Optional[str]) -> str:
          if content is None:
              return ""
 -        return _wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(content))
-+        # Pass through raw Markdown — WeChat now renders MD natively
-+        return content
++        return _wrap_copy_friendly_lines_for_weixin(_convert_markdown_for_weixin(content))
  
  
  async def send_weixin_direct(

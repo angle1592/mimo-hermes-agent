@@ -13,9 +13,10 @@
 
 ### 2. weixin-markdown-passthrough.patch
 - **文件**: `gateway/platforms/weixin.py`
-- **改了什么**: `format_message()` 从上游的格式转换管线改为直接 `return content`（原样透传）
-- **为什么**: 微信已原生支持 Markdown 渲染，不需要再转换
-- **注意**: 上游的格式管线一直在演变（v0.12: `_convert_markdown_for_weixin`，v0.13: `_wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(...))`），每次更新需检查 `format_message()` 的当前状态
+- **改了什么**: `format_message()` 中的 `_normalize_markdown_blocks(content)` 替换为 `_convert_markdown_for_weixin(content)`，保留外层包装
+- **为什么**: 微信已原生支持 Markdown 渲染，不需要再做 normalize 转换
+- **注意**: 上游的格式管线一直在演变（v0.12: `_convert_markdown_for_weixin`，v0.13: `_normalize_markdown_blocks`，v0.14: `_wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(...))`），每次更新需检查 `format_message()` 的当前状态并适配外层包装
+- **更新历史**: v0.14.0 (826 commits) Hunk #2 失败 — 上游新增 `_wrap_copy_friendly_lines_for_weixin()` 包装层，手动将内层 `_normalize_markdown_blocks` → `_convert_markdown_for_weixin` 并保留外层包装
 
 ### 3. delegate-tool.patch
 - **文件**: `tools/delegate_tool.py`

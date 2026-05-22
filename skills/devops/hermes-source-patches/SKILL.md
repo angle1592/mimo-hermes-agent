@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）和 `references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）和 `references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -24,7 +24,7 @@ tags: [hermes, patches, source-modification]
 |------|-------|------|
 | `tools/send_message_tool.py` | references/dingtalk-proactive-send.patch | 钉钉群主动发消息（Robot OpenAPI） |
 | `gateway/platforms/weixin.py` | references/weixin-markdown-conversion.patch | 微信 Markdown→纯文本转换（旧，已被 passthrough 替代） |
-| `gateway/platforms/weixin.py` | references/weixin-markdown-passthrough.patch | 微信 Markdown 原样透传（WeChat 已原生支持 MD 渲染） |
+| `gateway/platforms/weixin.py` | references/weixin-markdown-passthrough.patch | 微信 Markdown 透传（替换 normalize 为 convert，保留外层包装） |
 | `tools/delegate_tool.py` | references/delegate-tool.patch | 子代理模型 debug 日志 |
 | `tools/xiaomi_tts_tool.py` | references/xiaomi_tts_tool.py.bak | 小米 TTS 自定义工具（新文件） |
 | `run_agent.py` | references/compression-context-provider-bug.md | 压缩模型上下文误用主模型 provider（v0.12.0 bug，config workaround） |
@@ -76,7 +76,12 @@ command -v patch || yum install -y patch
 ```bash
 cd /usr/local/lib/hermes-agent
 
+# 0. 安全检查（必须先做！）
+swapon --show                                    # 确认 swap 存在
+command -v patch || yum install -y patch         # 确认 patch 命令
+
 # 1. 分析上游改动（逐文件检查是否与 patch 区域重叠）
+git fetch origin main
 git diff HEAD..origin/main -- <file> | head -200
 grep -n "^@@" ~/.hermes/skills/devops/hermes-source-patches/references/<name>.patch
 
@@ -89,12 +94,19 @@ git pull origin main
 # 4. 恢复 patches
 bash ~/.hermes/skills/devops/hermes-source-patches/scripts/restore-all.sh
 
-# 5. 验证（关键！确认改动行数与更新前一致）
+# 5. 如果有 hunk 失败 → 手动修复（见下方 Pitfall）
+# 5a. 查看失败详情: cat <file>.rej
+# 5b. 用 grep 定位当前代码: grep -n "<关键函数>" <file>
+# 5c. 做针对性替换（保留上游新增的包装层/参数）
+# 5d. 重新生成 patch: git diff <file> > references/<name>.patch
+# 5e. 清理 reject: rm -f <file>.rej
+
+# 6. 验证（关键！确认改动行数与更新前一致）
 git diff --stat              # 应与更新前的输出一致
 python3 -c "import py_compile; py_compile.compile('<modified_file>', doraise=True)"
 hermes --version
 
-# 6. 重启 Gateway（注意：会中断当前会话！让用户自行重启）
+# 7. 重启 Gateway（注意：会中断当前会话！让用户自行重启）
 echo "请执行: hermes gateway restart"
 ```
 
@@ -130,6 +142,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 4. **stash 不是 source of truth** — `git stash` 里的旧改动可能与新版冲突。patches 目录才是权威来源。stash 确认 patches 恢复成功后应立即 drop。
 
 4. **手动修复冲突后必须重新生成 patch 文件** — `restore-all.sh` 失败的 hunk 需要手动修复，修复后旧的 .patch 文件已经过时（上下文行号、函数签名都可能变了）。必须立即 `git diff <file> > references/<name>.patch` 更新 patch 文件，否则下次恢复会再次失败。v0.13.0 更新时 weixin.py 和 delegate_tool.py 都遇到了这个问题。
+
+5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
 
 5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
 
