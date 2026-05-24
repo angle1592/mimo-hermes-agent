@@ -13,6 +13,7 @@ metadata:
       - references/repo-sync.md
       - references/fastapi-mariadb.md
       - references/cloakbrowser-install.md
+      - references/ssh-reverse-tunnel-proxy.md
 ---
 
 # Deploy Services in China (Alibaba Cloud Linux)
@@ -455,6 +456,10 @@ curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint 
 | CloakBrowser | pip + GitHub binary | N/A | Stealth Chromium for automation. See `references/cloakbrowser-install.md` |
 
 For 2C2G machines, prefer Go binaries over Docker/Node.js services.
+
+## Accessing Blocked Sites (GFW Bypass)
+
+Server in China can't reach many foreign sites. If the user has a phone with working proxy/VPN, use an SSH reverse tunnel to forward the phone's proxy port to the server. See `references/ssh-reverse-tunnel-proxy.md` for the full pattern.
 
 ---
 

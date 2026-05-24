@@ -120,6 +120,10 @@ If `ghfast.top` stops working, alternatives to try: `https://mirror.ghproxy.com/
 
 Note: These mirrors come and go too. If `docker pull` still fails after configuring, consider downloading binaries directly via `ghfast.top` instead of using Docker.
 
+## Phone-as-Proxy / VPN Setup on China Server
+
+When the server has no VPN/proxy but needs to access external sites (GitHub, Google, etc.), the best approach is installing a proxy client (mihomo) directly on the server using the user's Clash subscription. SSH tunneling through the phone is unreliable. See `references/ssh-tunnel-proxy.md` for both approaches, setup steps, and pitfalls.
+
 ## Pushing to GitHub from China
 
 The `insteadOf` mirror config works transparently for `git push` too — git rewrites the URL the same way. But push requires authentication. Set up `~/.git-credentials`:
