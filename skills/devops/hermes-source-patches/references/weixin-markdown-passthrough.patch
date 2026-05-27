@@ -1,5 +1,5 @@
 diff --git a/gateway/platforms/weixin.py b/gateway/platforms/weixin.py
-index 1c9fec0af..239b1fcba 100644
+index 613c8283b..b7e9bbe25 100644
 --- a/gateway/platforms/weixin.py
 +++ b/gateway/platforms/weixin.py
 @@ -914,6 +914,128 @@ def _pack_markdown_blocks_for_weixin(content: str, max_length: int) -> List[str]
@@ -131,7 +131,7 @@ index 1c9fec0af..239b1fcba 100644
  def _split_text_for_weixin_delivery(
      content: str, max_length: int, split_per_line: bool = False,
  ) -> List[str]:
-@@ -2065,7 +2187,7 @@ class WeixinAdapter(BasePlatformAdapter):
+@@ -2067,7 +2189,7 @@ class WeixinAdapter(BasePlatformAdapter):
      def format_message(self, content: Optional[str]) -> str:
          if content is None:
              return ""

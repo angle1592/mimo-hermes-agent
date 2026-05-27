@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）和 `references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）和 `references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -142,6 +142,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 4. **stash 不是 source of truth** — `git stash` 里的旧改动可能与新版冲突。patches 目录才是权威来源。stash 确认 patches 恢复成功后应立即 drop。
 
 4. **手动修复冲突后必须重新生成 patch 文件** — `restore-all.sh` 失败的 hunk 需要手动修复，修复后旧的 .patch 文件已经过时（上下文行号、函数签名都可能变了）。必须立即 `git diff <file> > references/<name>.patch` 更新 patch 文件，否则下次恢复会再次失败。v0.13.0 更新时 weixin.py 和 delegate_tool.py 都遇到了这个问题。
+
+5. **上游在外层加了包装函数导致 patch hunk 失败** — v0.14.0 更新时 weixin.py 的 `format_message` 从 `return _normalize_markdown_blocks(content)` 变成了 `return _wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(content))`。Patch 期望替换整个表达式，但新代码多了外层包装。**正确做法**：保留外层包装，只替换内层函数 → `return _wrap_copy_friendly_lines_for_weixin(_convert_markdown_for_weixin(content))`。判断方法：`cat <file>.rej` 看失败的 hunk，`grep -n` 找当前代码中目标函数的实际调用方式，对比差异后做针对性替换。
 
 5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
 
