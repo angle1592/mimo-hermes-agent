@@ -455,12 +455,17 @@ setInterval(fetchData, 10000);
 
 
 def query_db():
-    """查询 state.db 获取 token 用量数据"""
-    if not os.path.exists(DB_PATH):
-        return {"error": "数据库未找到"}
+    """查询 state.db 获取 token 用量数据
 
+    Returns a dict with data on success, or raises an exception on failure.
+    Raises FileNotFoundError if the database file does not exist.
+    Raises sqlite3.Error on database access failures.
+    """
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(f"数据库未找到: {DB_PATH}")
+
+    conn = sqlite3.connect(DB_PATH)
     try:
-        conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -546,35 +551,46 @@ def query_db():
             m["discount_pct"] = cost_info["discount_pct"]
             models.append(m)
 
-        conn.close()
-
         return {
             "summary": summary,
             "sessions": sessions,
             "models": models,
             "updated_at": int(time.time()),
         }
-
-    except Exception as e:
-        return {"error": str(e)}
+    finally:
+        conn.close()
 
 
 class TokenMonitorHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # 减少日志输出
 
+    def _send_json(self, status_code, data):
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
 
         if path == "/api/data":
-            data = query_db()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            try:
+                data = query_db()
+            except FileNotFoundError as e:
+                import sys
+                print(f"[ERROR] {e}", file=sys.stderr)
+                self._send_json(503, {"error": str(e)})
+                return
+            except Exception as e:
+                import sys
+                print(f"[ERROR] 数据库查询失败: {e}", file=sys.stderr)
+                self._send_json(500, {"error": f"数据库查询失败: {e}"})
+                return
+            self._send_json(200, data)
             return
 
         if path == "/api/health":
@@ -593,11 +609,22 @@ class TokenMonitorHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    server = http.server.ThreadingHTTPServer((HOST, PORT), TokenMonitorHandler)
+    import sys
+    try:
+        server = http.server.ThreadingHTTPServer((HOST, PORT), TokenMonitorHandler)
+    except OSError as e:
+        print(f"[ERROR] 服务启动失败: {e}", file=sys.stderr)
+        if "Address already in use" in str(e) or getattr(e, 'errno', None) == 98:
+            print(f"  端口 {PORT} 已被占用，请检查是否有其他实例在运行", file=sys.stderr)
+        sys.exit(1)
     print(f"🌸 小珀 Token Monitor 启动成功！")
     print(f"   地址: http://{HOST}:{PORT}")
     print(f"   数据源: {DB_PATH}")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[INFO] 收到中断信号，正在关闭...", file=sys.stderr)
+        server.shutdown()
 
 
 if __name__ == "__main__":
