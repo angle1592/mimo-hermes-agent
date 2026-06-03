@@ -16,19 +16,12 @@
 
 set -euo pipefail
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+# Load shared utilities (colors, logging, common checks)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 
 # ── 检查 root ─────────────────────────────────────────
-if [[ $EUID -ne 0 ]]; then
-    error "请用 root 运行此脚本"
-fi
+require_root
 
 # ── 1. 安装依赖 ───────────────────────────────────────
 info "安装基础依赖..."

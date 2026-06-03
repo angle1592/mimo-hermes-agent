@@ -98,9 +98,14 @@ hermes gateway start
 ├── docs/
 │   ├── deployment-guide.md        # 部署步骤
 │   ├── mimo-integration.md        # MiMo 接入笔记
-│   └── pitfalls.md                # 踩坑记录
+│   ├── pitfalls.md                # 踩坑记录
+│   └── shared/                    # 跨 skill 共享文档
+│       ├── china-infra-patterns.md  # 国内基础设施通用模式
+│       └── model-pricing.md         # 模型定价参考
 ├── scripts/
+│   ├── lib.sh                     # 共享 shell 工具（日志、颜色、脱敏）
 │   ├── setup.sh                   # 一键部署脚本
+│   ├── sync.sh                    # 自动同步到 GitHub
 │   └── token_monitor.py           # Token 用量监控（Web 面板）
 └── .gitignore
 ```

@@ -36,11 +36,13 @@ Browser → Nginx (port 80) → Python HTTP server (127.0.0.1:8765) → state.db
 
 ### 1. Create the server script
 
-Save `server.py` to `~/.hermes/token_monitor/server.py`. The script:
+Save the canonical `scripts/token_monitor.py` (from this repo) to `~/.hermes/token_monitor/server.py`. The script:
 - Serves an HTML dashboard at `/`
 - Provides JSON API at `/api/data`
 - Queries `~/.hermes/state.db` for session data
-- Calculates costs based on model pricing (DeepSeek, etc.)
+- Calculates costs based on model pricing (see `docs/shared/model-pricing.md`)
+
+> **Note:** `references/server.py` in this skill directory is a pointer — the canonical implementation lives at `scripts/token_monitor.py`.
 
 ### 2. Set up systemd service
 

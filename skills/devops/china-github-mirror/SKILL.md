@@ -106,19 +106,9 @@ If `ghfast.top` stops working, alternatives to try: `https://mirror.ghproxy.com/
 
 ## Docker Hub Mirror
 
-`docker pull` from `registry-1.docker.io` also fails in China. Configure mirrors in `/etc/docker/daemon.json`:
+> **Full config:** see [`docs/shared/china-infra-patterns.md` — Docker Hub Mirror](../../../docs/shared/china-infra-patterns.md#docker-hub-mirror)
 
-```json
-{
-  "registry-mirrors": [
-    "https://mirror.ccs.tencentyun.com",
-    "https://registry.docker-cn.com",
-    "https://docker.mirrors.ustc.edu.cn"
-  ]
-}
-```
-
-Note: These mirrors come and go too. If `docker pull` still fails after configuring, consider downloading binaries directly via `ghfast.top` instead of using Docker.
+Note: These mirrors come and go. If `docker pull` still fails after configuring, consider downloading binaries directly via `ghfast.top` instead of using Docker.
 
 ## Phone-as-Proxy / VPN Setup on China Server
 
