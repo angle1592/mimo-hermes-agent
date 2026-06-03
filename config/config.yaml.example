@@ -337,7 +337,7 @@ hooks_auto_accept: false
 personalities: {}
 security:
   allow_private_urls: false
-  redact_secrets: false
+  redact_secrets: true
   tirith_enabled: true
   tirith_path: tirith
   tirith_timeout: 5
@@ -386,7 +386,7 @@ platforms:
       chat_id: REDACTED
       name: "\u661F\u9645\u5A31\u4E50\u548C\u5E73\u516C\u53F8"
     extra:
-      client_id: dinguj38jyamwnlu8y0e
+      client_id: REDACTED
       client_secret: REDACTED
 plugins:
   enabled:
@@ -402,8 +402,8 @@ mcp_servers:
     args:
     - -y
     - '@modelcontextprotocol/server-filesystem'
-    - /root
-    - /tmp
+    # Restrict to project directory only — avoid granting access to /root or /tmp
+    - /root/.hermes/workspace
     timeout: 30
   playwright:
     command: npx

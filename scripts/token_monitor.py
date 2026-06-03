@@ -877,7 +877,8 @@ class TokenMonitorHandler(http.server.BaseHTTPRequestHandler):
     def _send_json(self, status_code, data):
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # Restrict CORS to localhost (served behind nginx reverse proxy)
+            self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
@@ -892,12 +893,12 @@ class TokenMonitorHandler(http.server.BaseHTTPRequestHandler):
             except FileNotFoundError as e:
                 import sys
                 print(f"[ERROR] {e}", file=sys.stderr)
-                self._send_json(503, {"error": str(e)})
+                self._send_json(503, {"error": "Database not available"})
                 return
             except Exception as e:
                 import sys
                 print(f"[ERROR] 数据库查询失败: {e}", file=sys.stderr)
-                self._send_json(500, {"error": f"数据库查询失败: {e}"})
+                self._send_json(500, {"error": "Internal server error"})
                 return
             self._send_json(200, data)
             return
