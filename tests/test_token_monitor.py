@@ -188,10 +188,10 @@ class TestQueryDB(unittest.TestCase):
         """)
         return conn
 
-    def test_missing_db_returns_error(self):
+    def test_missing_db_raises_file_not_found(self):
         with patch.object(token_monitor, "DB_PATH", "/tmp/nonexistent_db_12345.db"):
-            result = token_monitor.query_db()
-            self.assertIn("error", result)
+            with self.assertRaises(FileNotFoundError):
+                token_monitor.query_db()
 
     def test_empty_db(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -385,7 +385,7 @@ class TestHTTPHandler(unittest.TestCase):
 
     def test_cors_header_on_data(self):
         _, _, headers = self._get("/api/data")
-        self.assertEqual(headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertEqual(headers.get("Access-Control-Allow-Origin"), "http://127.0.0.1")
 
     def test_cache_control_on_data(self):
         _, _, headers = self._get("/api/data")
