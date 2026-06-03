@@ -42,6 +42,7 @@ sanitize_file() {
         -e 's/(app_key:\s*).*/\1REDACTED/' \
         -e 's/(app_secret:\s*).*/\1REDACTED/' \
         -e 's/(api_key:\s*).*/\1""/' \
+        -e 's/(client_id:\s*).*/\1REDACTED/' \
         -e 's/(client_secret:\s*).*/\1REDACTED/' \
         -e 's/(record_key:\s*).*/\1FILL_IN/' \
         "$file"
