@@ -77,14 +77,61 @@ When `wechat-reader` returns `captcha_required`:
    ```bash
    bash /opt/wechat-reader/start-services.sh
    ```
-2. Tell user to open noVNC link and complete captcha:
+2. **Use CDP to navigate Chromium to the target article URL** — this triggers the captcha page automatically:
+   ```bash
+   cd /opt/wechat-reader && uv run python3 << 'PYEOF'
+   from playwright.sync_api import sync_playwright
+   with sync_playwright() as p:
+       browser = p.chromium.connect_over_cdp('http://127.0.0.1:9222')
+       context = browser.contexts[0]
+       pages = context.pages
+       page = pages[0] if pages else context.new_page()
+       page.goto('<ARTICLE_URL>', timeout=30000)
+       print(f"Title: {page.title()}")
+       print(f"URL: {page.url}")
+   PYEOF
    ```
-   http://<server-ip>:6080/vnc_lite.html?autoconnect=true&resize=scale
+   The page will redirect to `mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?...` — this is the Tencent captcha page.
+3. Tell user to open noVNC and drag the slider:
    ```
-3. User drags the Tencent captcha slider
-4. Test: `cd /opt/wechat-reader && uv run wechat-reader read "https://mp.weixin.qq.com/s/test" --json` → should return `ok` or article content
+   http://YOUR_SERVER_IP:6080/vnc_lite.html?autoconnect=true&resize=scale
+   ```
+   **注意：** nginx配置中noVNC路径是 `/vnc/`，但nginx代理WebSocket不稳定（502、connection reset）。**推荐直接用端口6080访问**。
+4. User drags the Tencent captcha slider in noVNC
+5. Test: `cd /opt/wechat-reader && uv run wechat-reader read "<ARTICLE_URL>" --json` → should return `ok` with article content
 
-**If user says the link doesn't open:** Check Alibaba Cloud security group — TCP 6080 must be open for inbound. Can close it again after verification for security (VNC is unencrypted, no password).
+**关键改进：** 不要让用户手动在 noVNC 里输入 URL，用 CDP 直接导航到目标文章 URL。用户只需在 noVNC 里拖拽验证码滑块即可。
+
+**If user says the link doesn't open (502 / ERR_EMPTY_RESPONSE / connection reset):**
+
+1. Check websockify is running: `ps aux | grep websockify | grep -v grep`
+2. If not running or stale, restart it:
+   ```bash
+   kill $(pgrep websockify) 2>/dev/null; sleep 1
+   nohup /usr/bin/python3 /usr/bin/websockify --web /opt/noVNC 6080 localhost:5900 &
+   ```
+3. Reload nginx: `nginx -s reload`
+4. Test locally: `curl -s http://127.0.0.1:6080/vnc_lite.html | head -1` (should return HTML)
+5. Test via nginx: `curl -s -o /dev/null -w "%{http_code}" http://YOUR_SERVER_IP/vnc/vnc_lite.html` (should return 200)
+
+**nginx WebSocket proxy config must include:**
+```nginx
+location /vnc/ {
+    auth_basic off;
+    proxy_pass http://127.0.0.1:6080/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 86400;
+    proxy_send_timeout 86400;
+}
+```
+
+If still failing, check Alibaba Cloud security group — TCP 80 must be open for inbound (noVNC goes through nginx on port 80, not direct 6080).
 
 ## Services
 
@@ -117,8 +164,10 @@ A daily cron job (`wechat-reader-cookies-check`) runs at 9:00 AM to:
 - **iLink Bot API token ≠ browser cookies** — The Hermes WeChat messaging gateway uses a completely separate auth system. Having a WeChat bot connection does NOT help with reading articles.
 - **"Refreshing too often"** — Tencent captcha rate limit. Wait a few minutes before retrying.
 - **nginx auth_basic blocks noVNC** — The Hermes Dashboard nginx config has auth_basic on the root server block. Either use direct port 6080 access, or add a `location /vnc/` block with `auth_basic off`.
-- **Playwright download fails** → See `docs/shared/china-infra-patterns.md` "pip / npm China Mirror Workarounds"
-- **Chrome profile corruption** → See `docs/shared/china-infra-patterns.md` "Chrome Profile Corruption Fix"
+- **noVNC access method** — 两种方式：(1) 直接端口 `http://YOUR_SERVER_IP:6080/vnc_lite.html`（推荐，稳定）；(2) nginx代理 `http://YOUR_SERVER_IP/vnc/vnc_lite.html`（可能遇到502/WebSocket问题）。nginx代理不稳定时重启websockify：`kill $(pgrep websockify); sleep 1; nohup /usr/bin/python3 /usr/bin/websockify --web /opt/noVNC 6080 localhost:5900 &`
+- **Playwright download fails** → Tsinghua mirror: `UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`; npm mirror: `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright`
+- **Chrome profile corruption** → On unclean kill, delete lock files: `rm -f /root/.wechat-reader/profiles/default/Default/{Lock,.lock} SingletonLock`
+- **`mp.weixin.qq.com/s/test` shows "Parameter error"** — This is NOT a valid article URL. It's a test path that Tencent rejects. Always navigate Chromium to the actual article URL the user wants to read. Using a real URL triggers the captcha; using `s/test` shows a confusing error page in noVNC.
 - **Automated captcha solving is NOT feasible** — Tencent drag captcha has anti-automation measures. Manual verification via noVNC is the only reliable approach.
 - **`pkill -9` may kill parent shell** — On some setups, `pkill -9 -f chrome` kills the terminal session too. Use specific PIDs: `ps aux | grep chrome | grep -v grep | awk '{print $2}' | xargs kill -9` instead.
 - **`send_message` tool can't send WeChat media** — The weixin adapter requires `WEIXIN_HOME_CHANNEL` to be set for outbound media. For screenshots, host on nginx (`/audio/` path, `auth_basic off`) and send the URL instead.
