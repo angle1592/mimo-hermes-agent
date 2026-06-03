@@ -2,11 +2,13 @@
 # sync.sh — 自动同步 Hermes Agent 配置和文档到 GitHub 仓库
 set -euo pipefail
 
+# Load shared utilities (colors, logging, sanitization)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
+
 REPO_DIR="/root/mimo-hermes-agent"
 HERMES_DIR="${HERMES_DIR:-$HOME/.hermes}"
 DRY_RUN="${1:-}"
-
-log() { echo "[sync] $(date '+%H:%M:%S') $*"; }
 
 # 自定义 skill 白名单
 CUSTOM_SKILLS=(
@@ -24,22 +26,7 @@ CUSTOM_SKILLS=(
     "autonomous-ai-agents/hermes-agent"
 )
 
-# 脱敏函数：处理单个文件
-sanitize_file() {
-    local file="$1"
-    sed -i -E \
-        -e 's/cid[A-Za-z0-9+/=]{10,}/REDACTED_CHAT_ID/g' \
-        -e 's/47\.119\.146\.[0-9]+/YOUR_SERVER_IP/g' \
-        -e 's/ghp_[A-Za-z0-9]+/REDACTED_PAT/g' \
-        -e 's/sk-[A-Za-z0-9]{20,}/REDACTED_KEY/g' \
-        -e 's/(chat_id:\s*).*/\1REDACTED/' \
-        -e 's/(app_key:\s*).*/\1REDACTED/' \
-        -e 's/(app_secret:\s*).*/\1REDACTED/' \
-        -e 's/(api_key:\s*).*/\1""/' \
-        -e 's/(client_secret:\s*).*/\1REDACTED/' \
-        -e 's/(record_key:\s*).*/\1FILL_IN/' \
-        "$file"
-}
+# sanitize_file is now provided by lib.sh
 
 sync_config() {
     log "同步 config.yaml..."

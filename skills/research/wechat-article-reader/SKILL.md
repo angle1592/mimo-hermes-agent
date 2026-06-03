@@ -117,8 +117,8 @@ A daily cron job (`wechat-reader-cookies-check`) runs at 9:00 AM to:
 - **iLink Bot API token ≠ browser cookies** — The Hermes WeChat messaging gateway uses a completely separate auth system. Having a WeChat bot connection does NOT help with reading articles.
 - **"Refreshing too often"** — Tencent captcha rate limit. Wait a few minutes before retrying.
 - **nginx auth_basic blocks noVNC** — The Hermes Dashboard nginx config has auth_basic on the root server block. Either use direct port 6080 access, or add a `location /vnc/` block with `auth_basic off`.
-- **Playwright download fails** → Tsinghua mirror: `UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`; npm mirror: `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright`
-- **Chrome profile corruption** → On unclean kill, delete lock files: `rm -f /root/.wechat-reader/profiles/default/Default/{Lock,.lock} SingletonLock`
+- **Playwright download fails** → See `docs/shared/china-infra-patterns.md` "pip / npm China Mirror Workarounds"
+- **Chrome profile corruption** → See `docs/shared/china-infra-patterns.md` "Chrome Profile Corruption Fix"
 - **Automated captcha solving is NOT feasible** — Tencent drag captcha has anti-automation measures. Manual verification via noVNC is the only reliable approach.
 - **`pkill -9` may kill parent shell** — On some setups, `pkill -9 -f chrome` kills the terminal session too. Use specific PIDs: `ps aux | grep chrome | grep -v grep | awk '{print $2}' | xargs kill -9` instead.
 - **`send_message` tool can't send WeChat media** — The weixin adapter requires `WEIXIN_HOME_CHANNEL` to be set for outbound media. For screenshots, host on nginx (`/audio/` path, `auth_basic off`) and send the URL instead.
