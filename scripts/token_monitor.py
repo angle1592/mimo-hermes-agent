@@ -878,7 +878,7 @@ class TokenMonitorHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         # Restrict CORS to localhost (served behind nginx reverse proxy)
-            self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1")
+        self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))

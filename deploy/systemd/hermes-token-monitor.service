@@ -4,10 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-# Run as a dedicated user instead of root for least-privilege security.
-# Create user: useradd -r -s /sbin/nologin hermes
-# Then grant read access to state.db: setfacl -m u:hermes:r ~/.hermes/state.db
-User=hermes
+# Security note: for production, consider creating a dedicated user
+# and granting access to ~/.hermes/ via setfacl. Example:
+#   useradd -r -s /sbin/nologin hermes
+#   setfacl -R -m u:hermes:rwx ~/.hermes/token_monitor/
+#   setfacl -m u:hermes:r ~/.hermes/state.db
+# Then change User=root to User=hermes below.
+User=root
 WorkingDirectory=/root/.hermes/token_monitor
 Environment=HOME=/root
 Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
