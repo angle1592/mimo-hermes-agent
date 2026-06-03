@@ -25,9 +25,13 @@ require_root
 
 # ── 1. 安装依赖 ───────────────────────────────────────
 info "安装基础依赖..."
-yum install -y python3 python3-pip git curl wget nginx patch gcc python3-devel 2>/dev/null || {
-    apt-get update && apt-get install -y python3 python3-pip git curl wget nginx patch gcc python3-dev
-}
+if command -v yum &>/dev/null; then
+    yum install -y python3 python3-pip git curl wget nginx patch gcc python3-devel || error "yum 安装失败，请检查网络或软件源配置"
+elif command -v apt-get &>/dev/null; then
+    apt-get update && apt-get install -y python3 python3-pip git curl wget nginx patch gcc python3-dev || error "apt-get 安装失败，请检查网络或软件源配置"
+else
+    error "未找到 yum 或 apt-get，请手动安装依赖"
+fi
 
 # 确认 Python 版本
 PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
@@ -37,14 +41,17 @@ fi
 
 # ── 2. 安装 Hermes Agent ──────────────────────────────
 info "安装 Hermes Agent..."
-pip3 install hermes-agent 2>/dev/null || pip3 install --break-system-packages hermes-agent
+pip3 install hermes-agent 2>&1 || {
+    warn "pip3 install 失败，尝试 --break-system-packages..."
+    pip3 install --break-system-packages hermes-agent || error "Hermes Agent 安装失败"
+}
 
 # 初始化
 hermes --version || error "Hermes 安装失败"
 info "Hermes 版本: $(hermes --version)"
 
 # 初始化配置目录
-hermes init 2>/dev/null || true
+hermes init 2>&1 || warn "hermes init 返回非零状态（可能已初始化过）"
 
 # ── 3. 部署 Token 监控面板 ────────────────────────────
 info "部署 Token 监控面板..."
@@ -89,8 +96,8 @@ fi
 
 # ── 6. 启动服务 ───────────────────────────────────────
 info "启动服务..."
-systemctl start hermes-token-monitor 2>/dev/null || warn "Token 监控启动失败"
-systemctl start hermes-dashboard 2>/dev/null || warn "Dashboard 启动失败"
+systemctl start hermes-token-monitor 2>&1 || warn "Token 监控启动失败，请检查: systemctl status hermes-token-monitor"
+systemctl start hermes-dashboard 2>&1 || warn "Dashboard 启动失败，请检查: systemctl status hermes-dashboard"
 
 # ── 完成 ──────────────────────────────────────────────
 echo ""

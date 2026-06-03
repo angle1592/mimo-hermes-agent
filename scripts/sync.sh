@@ -84,7 +84,8 @@ sync_cron_jobs() {
 | 状态 | 名称 | 调度 | 说明 |
 |------|------|------|------|
 HEADER
-    python3 -c "
+    local parse_err
+    parse_err=$(python3 -c "
 import json
 with open('$src') as f:
     jobs = json.load(f)
@@ -98,7 +99,11 @@ for job in jobs:
         desc += '...'
     status = '✅' if enabled else '⏸️'
     print(f'| {status} | {name} | \`{schedule}\` | {desc} |')
-" >> "$dst" 2>/dev/null || echo "| ❌ | - | - | 解析失败 |" >> "$dst"
+" >> "$dst" 2>&1)
+    if [ $? -ne 0 ]; then
+        echo "| ❌ | - | - | 解析失败 |" >> "$dst"
+        log "  ⚠️  cron jobs 解析失败: $parse_err"
+    fi
     log "  → docs/cron-jobs.md"
 }
 
@@ -148,10 +153,13 @@ main() {
             git reset HEAD -- . >/dev/null 2>&1
         else
             git commit -m "sync: auto-update $(date '+%Y-%m-%d %H:%M')"
-            git push origin main 2>&1 || {
+            local push_output
+            push_output=$(git push origin main 2>&1) || {
+                log "⚠️  push 到 main 失败: $push_output"
                 local branch
                 branch=$(git rev-parse --abbrev-ref HEAD)
-                git push origin "$branch" 2>&1
+                log "尝试 push 到当前分支: $branch"
+                git push origin "$branch" 2>&1 || log "❌ push 到 $branch 也失败"
             }
             log "同步完成 ✅"
         fi
