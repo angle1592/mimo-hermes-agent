@@ -31,12 +31,12 @@ def _sanitize(content: str) -> str:
             f"-e 's/47\\.119\\.146\\.[0-9]+/YOUR_SERVER_IP/g' "
             f"-e 's/ghp_[A-Za-z0-9]+/REDACTED_PAT/g' "
             f"-e 's/sk-[A-Za-z0-9]{{20,}}/REDACTED_KEY/g' "
-            f"""-e 's/(chat_id:\\s*).*/\\1REDACTED/' """
-            f"""-e 's/(app_key:\\s*).*/\\1REDACTED/' """
-            f"""-e 's/(app_secret:\\s*).*/\\1REDACTED/' """
-            f"""-e 's/(api_key:\\s*).*/\\1""/' """
-            f"""-e 's/(client_secret:\\s*).*/\\1REDACTED/' """
-            f"""-e 's/(record_key:\\s*).*/\\1FILL_IN/' """
+            f"""-e 's/(chat_id:REDACTED
+            f"""-e 's/(app_key:REDACTED
+            f"""-e 's/(app_secret:REDACTED
+            f"""-e 's/(api_key:""
+            f"""-e 's/(client_secret:REDACTED
+            f"""-e 's/(record_key:FILL_IN
             f"{tmp}"
         )
         subprocess.run(["bash", "-c", cmd], check=True)
@@ -50,66 +50,66 @@ class TestSanitizeFile(unittest.TestCase):
     """Test the sed-based sanitisation patterns from sync.sh."""
 
     def test_redacts_github_pat(self):
-        text = "token: ghp_abcdefghij1234567890"
+        text = "token: REDACTED_PAT"
         result = _sanitize(text)
-        self.assertNotIn("ghp_abcdefghij1234567890", result)
+        self.assertNotIn("REDACTED_PAT", result)
         self.assertIn("REDACTED_PAT", result)
 
     def test_redacts_sk_api_key(self):
-        text = "DEEPSEEK_API_KEY=sk-abcdefghij1234567890abcdefghij"
+        text = "DEEPSEEK_API_KEY=REDACTED_KEY"
         result = _sanitize(text)
-        self.assertNotIn("sk-abcdefghij1234567890abcdefghij", result)
+        self.assertNotIn("REDACTED_KEY", result)
         self.assertIn("REDACTED_KEY", result)
 
     def test_redacts_server_ip(self):
-        text = "server: 47.119.146.123"
+        text = "server: YOUR_SERVER_IP"
         result = _sanitize(text)
-        self.assertNotIn("47.119.146.123", result)
+        self.assertNotIn("YOUR_SERVER_IP", result)
         self.assertIn("YOUR_SERVER_IP", result)
 
     def test_redacts_chat_id_long(self):
-        text = "cidABCDefgh1234567890"
+        text = "REDACTED_CHAT_ID"
         result = _sanitize(text)
         self.assertIn("REDACTED_CHAT_ID", result)
 
     def test_redacts_yaml_chat_id_field(self):
-        text = "chat_id: some_secret_id_12345"
+        text = "chat_id: REDACTED
         result = _sanitize(text)
-        self.assertIn("chat_id:", result)
+        self.assertIn("chat_id:REDACTED
         self.assertIn("REDACTED", result)
         self.assertNotIn("some_secret_id_12345", result)
 
     def test_redacts_app_key(self):
-        text = "app_key: ding_abc123"
+        text = "app_key: REDACTED
         result = _sanitize(text)
-        self.assertIn("app_key:", result)
+        self.assertIn("app_key:REDACTED
         self.assertIn("REDACTED", result)
         self.assertNotIn("ding_abc123", result)
 
     def test_redacts_app_secret(self):
-        text = "app_secret: super_secret_value"
+        text = "app_secret: REDACTED
         result = _sanitize(text)
-        self.assertIn("app_secret:", result)
+        self.assertIn("app_secret:REDACTED
         self.assertIn("REDACTED", result)
         self.assertNotIn("super_secret_value", result)
 
     def test_redacts_api_key_yaml(self):
-        text = 'api_key: sk-abcdef1234'
+        text = 'api_key: ""
         result = _sanitize(text)
-        self.assertIn("api_key:", result)
+        self.assertIn("api_key:""
         self.assertIn('""', result)
 
     def test_redacts_client_secret(self):
-        text = "client_secret: my_oauth_secret"
+        text = "client_secret: REDACTED
         result = _sanitize(text)
-        self.assertIn("client_secret:", result)
+        self.assertIn("client_secret:REDACTED
         self.assertIn("REDACTED", result)
         self.assertNotIn("my_oauth_secret", result)
 
     def test_redacts_record_key(self):
-        text = "record_key: cypress_key_123"
+        text = "record_key: FILL_IN
         result = _sanitize(text)
-        self.assertIn("record_key:", result)
+        self.assertIn("record_key:FILL_IN
         self.assertIn("FILL_IN", result)
         self.assertNotIn("cypress_key_123", result)
 
@@ -120,13 +120,13 @@ class TestSanitizeFile(unittest.TestCase):
 
     def test_multiple_patterns_in_one_file(self):
         text = textwrap.dedent("""\
-            server: 47.119.146.55
-            token: ghp_abc1234567890XYZ
-            api_key: sk-longkeyvalue123456789012
-            app_secret: dingtalk_secret
+            server: YOUR_SERVER_IP
+            token: REDACTED_PAT
+            api_key: ""
+            app_secret: REDACTED
         """)
         result = _sanitize(text)
-        self.assertNotIn("47.119.146.55", result)
+        self.assertNotIn("YOUR_SERVER_IP", result)
         self.assertNotIn("ghp_", result)
         self.assertNotIn("dingtalk_secret", result)
         self.assertIn("YOUR_SERVER_IP", result)

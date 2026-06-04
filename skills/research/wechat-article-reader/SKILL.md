@@ -162,8 +162,9 @@ A daily cron job (`wechat-reader-cookies-check`) runs at 9:00 AM to:
 ## Pitfalls
 
 - **iLink Bot API token ≠ browser cookies** — The Hermes WeChat messaging gateway uses a completely separate auth system. Having a WeChat bot connection does NOT help with reading articles.
-- **"Refreshing too often"** — Tencent captcha rate limit. Wait a few minutes before retrying.
-- **nginx auth_basic blocks noVNC** — The Hermes Dashboard nginx config has auth_basic on the root server block. Either use direct port 6080 access, or add a `location /vnc/` block with `auth_basic off`.
+| Captcha "Refreshing too often" | Tencent rate limit — wait a few minutes before retrying |
+| `send_message` tool fails for WeChat attachments | WeChat adapter has `home_channel` requirement for outbound media; use direct curl to send images instead |
+| User gives a URL to read, but noVNC shows "Parameter error" | The Chromium in noVNC needs to navigate to the URL first. Use CDP to control it: `from playwright.sync_api import sync_playwright; browser = p.chromium.connect_over_cdp('http://127.0.0.1:9222'); page = browser.contexts[0].pages[0]; page.goto(URL)`. This triggers the captcha in noVNC for the user to complete. |
 - **noVNC access method** — 两种方式：(1) 直接端口 `http://YOUR_SERVER_IP:6080/vnc_lite.html`（推荐，稳定）；(2) nginx代理 `http://YOUR_SERVER_IP/vnc/vnc_lite.html`（可能遇到502/WebSocket问题）。nginx代理不稳定时重启websockify：`kill $(pgrep websockify); sleep 1; nohup /usr/bin/python3 /usr/bin/websockify --web /opt/noVNC 6080 localhost:5900 &`
 - **Playwright download fails** → Tsinghua mirror: `UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`; npm mirror: `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright`
 - **Chrome profile corruption** → On unclean kill, delete lock files: `rm -f /root/.wechat-reader/profiles/default/Default/{Lock,.lock} SingletonLock`

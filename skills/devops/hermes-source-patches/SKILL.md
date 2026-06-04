@@ -59,7 +59,7 @@ grep -n "^@@" ~/.hermes/skills/devops/hermes-source-patches/references/<name>.pa
 ```bash
 # 1. Swap 必须存在（2GB 机器无 swap 更新会直接卡死！）
 swapon --show
-# 如果为空 → 先加 swap，再更新。详见 docs/shared/china-infra-patterns.md "Swap Setup"
+# 如果为空 → 先加 swap，再更新。详见 deploy-service-china skill Step 0。
 
 # 2. 确认 patch 命令已安装
 command -v patch || yum install -y patch
@@ -67,9 +67,9 @@ command -v patch || yum install -y patch
 
 ### Pitfall: 无 Swap 更新 = 服务器卡死
 
-> **详细说明和 swap 设置命令：** 见 [`docs/shared/china-infra-patterns.md` — Swap Setup](../../../docs/shared/china-infra-patterns.md#swap-setup-mandatory-for--2gb-ram)
+真实案例：2C2G 服务器凌晨自动 Hermes 更新（131 commits），pip/npm 同时下载解压大量依赖包，内存和磁盘 I/O 打满，系统完全无响应，只能强制重启。没有任何 OOM 日志——内核连 OOM killer 都跑不起来。
 
-更新 Hermes 不是轻量操作。大版本更新可能拉取上百个 commit 并重装大量依赖。低配机器务必先确认 swap 存在。
+**教训：** 更新 Hermes 不是轻量操作。大版本更新可能拉取上百个 commit 并重装大量依赖。低配机器务必先确认 swap 存在。
 
 ## 完整更新流程
 

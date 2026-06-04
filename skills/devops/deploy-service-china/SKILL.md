@@ -46,11 +46,30 @@ Hermes auto-update can pull 100+ commits and reinstall pip/npm dependencies. On 
 
 ## Step 0: Swap Setup (MANDATORY for ≤2GB RAM)
 
-> **Full instructions and pitfalls:** see [`docs/shared/china-infra-patterns.md` — Swap Setup](../../../docs/shared/china-infra-patterns.md#swap-setup-mandatory-for--2gb-ram)
+2GB RAM with no swap will crash during heavy I/O operations (dependency installs, Hermes updates, large git pulls). The system becomes unresponsive — SSH hangs, disk I/O maxes out, requires hard reboot.
 
 ```bash
-swapon --show   # If empty → set up swap first (see shared doc)
+# Create 2GB swap file
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+
+# Persist across reboots
+echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+
+# Low swappiness — only use swap as emergency buffer
+echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
+sysctl -p /etc/sysctl.d/99-swap.conf
+
+# Verify
+swapon --show
+free -h
 ```
+
+### Pitfall: No Swap = Silent Crash
+
+Hermes updates pull many commits and reinstall pip/npm dependencies. With 2GB RAM and no swap, concurrent package downloads + extraction can exhaust memory, causing the kernel to hang (no OOM kill, just freeze). Always set up swap before running heavy update operations.
 
 ---
 
@@ -73,9 +92,50 @@ yum install -y docker-ce docker-ce-cli containerd.io
 systemctl enable docker && systemctl start docker
 ```
 
-### Pitfall: Docker Hub Mirror
+### Pitfall: Docker Hub Mirror (Unreliable in China)
 
-If `docker pull` fails even after install, configure a registry mirror. See [`docs/shared/china-infra-patterns.md` — Docker Hub Mirror](../../../docs/shared/china-infra-patterns.md#docker-hub-mirror) for the mirror list and config.
+Docker Hub mirrors (`mirror.ccs.tencentyun.com`, `registry.docker-cn.com`, etc.) are **unreliable** — they frequently go down or become unreachable. If `docker pull` fails with mirror errors, the best solution is to route Docker through a local proxy (mihomo/Clash).
+
+**Preferred: Use local proxy (mihomo/Clash)**
+
+If a local proxy is running (e.g., mihomo on port 7890), configure Docker to use it:
+
+```bash
+# 1. Configure Docker daemon proxy via systemd override
+mkdir -p /etc/systemd/system/docker.service.d
+cat > /etc/systemd/system/docker.service.d/proxy.conf << 'EOF'
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7890"
+Environment="HTTPS_PROXY=http://127.0.0.1:7890"
+Environment="NO_PROXY=localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+EOF
+
+# 2. Remove broken mirrors (optional but cleaner)
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": []
+}
+EOF
+
+# 3. Restart Docker
+systemctl daemon-reload && systemctl restart docker
+```
+
+**Fallback: Configure mirrors**
+
+```bash
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://registry.docker-cn.com",
+    "https://docker.mirrors.ustc.edu.cn"
+  ]
+}
+EOF
+systemctl daemon-reload && systemctl restart docker
+```
 
 Note: Mirrors may also be unreliable. If Docker pull still fails, download the binary directly (see Step 2).
 
@@ -83,12 +143,32 @@ Note: Mirrors may also be unreliable. If Docker pull still fails, download the b
 
 ## Step 2: Download Binaries via GitHub Proxy
 
-> **Proxy pattern and verification:** see [`docs/shared/china-infra-patterns.md` — GitHub Proxy](../../../docs/shared/china-infra-patterns.md#github-proxy-for-release-downloads)
+Direct GitHub downloads are slow or timeout from China. Use a GitHub proxy mirror.
 
 ```bash
+# Pattern: prepend proxy URL to the GitHub raw/release URL
+# Working proxies (test before use, they change):
+#   https://ghfast.top/
+#   https://ghproxy.com/
+#   https://mirror.ghproxy.com/
+
+# Example: download a release asset
 PROXY="https://ghfast.top/"
 RELEASE_URL="https://github.com/OWNER/REPO/releases/download/TAG/asset.tar.gz"
 curl -L --connect-timeout 15 --max-time 180 -o /tmp/asset.tar.gz "${PROXY}${RELEASE_URL}"
+```
+
+### Pitfall: Incomplete Downloads
+
+Always verify download integrity:
+
+```bash
+# Check file size matches expected
+ls -la /tmp/asset.tar.gz
+# Try to extract / run
+tar xzf /tmp/asset.tar.gz 2>&1 || echo "CORRUPTED - retry download"
+# For binaries, test immediately
+./binary --version
 ```
 
 If download is corrupted (Bus error, unexpected EOF), retry with a different proxy.
@@ -195,9 +275,24 @@ server {
 
 ## Step 4: Systemd Service
 
-Always create a systemd service for persistence. See [`docs/shared/china-infra-patterns.md` — Systemd Service Template](../../../docs/shared/china-infra-patterns.md#systemd-service-template) for the boilerplate.
+Always create a systemd service for persistence:
 
 ```bash
+cat > /etc/systemd/system/YOUR-SERVICE.service << 'EOF'
+[Unit]
+Description=Your Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/your-service --config /etc/your-service/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable YOUR-SERVICE
 systemctl start YOUR-SERVICE
@@ -207,11 +302,24 @@ systemctl start YOUR-SERVICE
 
 ## Step 5: MANDATORY Testing
 
-**Never tell the user "it's done" without verifying.** See [`docs/shared/china-infra-patterns.md` — Service Verification Checklist](../../../docs/shared/china-infra-patterns.md#service-verification-checklist) for the standard checks.
-
-Additionally, run a functional test (login, API) specific to the service:
+**Never tell the user "it's done" without verifying.**
 
 ```bash
+# 1. Service is running
+systemctl status YOUR-SERVICE --no-pager | head -10
+
+# 2. Port is listening
+ss -tlnp | grep YOUR-PORT
+
+# 3. Local HTTP test
+curl -s -o /dev/null -w "%{http_code}" http://localhost:YOUR-PORT/
+# Expect: 200
+
+# 4. Public access test (through nginx)
+curl -s -o /dev/null -w "%{http_code}" http://PUBLIC-IP/your-path/
+# Expect: 200 (or 401 if auth required — that's OK)
+
+# 5. Functional test (login, API, etc.)
 curl -s -X POST http://localhost:YOUR-PORT/api/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin"}'
@@ -275,21 +383,77 @@ After verification, the browser cookies persist in `--user-data-dir`. Tools like
 
 ### Pitfall: Chrome Profile Corruption on Unclean Shutdown
 
-See [`docs/shared/china-infra-patterns.md` — Chrome Profile Corruption Fix](../../../docs/shared/china-infra-patterns.md#chrome-profile-corruption-fix).
+If Chrome is killed (e.g., `pkill -9 chrome`) without clean shutdown, the `--user-data-dir` profile can corrupt. Symptoms: Chrome starts but shows blank page or crashes immediately.
+
+**Fix:** Delete the lock files:
+```bash
+rm -f /root/.browser-profiles/default/Default/{Lock,.lock}
+rm -f /root/.browser-profiles/SingletonLock
+```
+Or use a fresh profile dir for each session.
 
 ### Pitfall: `playwright install-deps` Fails on Alibaba Cloud Linux
 
-See [`docs/shared/china-infra-patterns.md` — Playwright install-deps](../../../docs/shared/china-infra-patterns.md#playwright-install-deps-on-alibaba-cloud-linux).
+Playwright's `install-deps` uses `apt-get` (Ubuntu-only). On Alibaba Cloud Linux (yum-based), install manually:
+
+```bash
+yum install -y nss atk at-spi2-atk cups-libs libdrm mesa-libgbm \
+  libXcomposite libXdamage libXrandr alsa-lib pango gtk3 libxkbcommon
+```
 
 ### Pitfall: Slow pip/Playwright Downloads in China
 
-See [`docs/shared/china-infra-patterns.md` — pip / npm China Mirrors](../../../docs/shared/china-infra-patterns.md#pip--npm-china-mirror-workarounds).
+Use Tsinghua mirror for Python packages:
+```bash
+UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple uv sync
+pip install PACKAGE -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+For Playwright browser binaries, use npmmirror:
+```bash
+PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright playwright install chromium
+```
+
+Without mirrors, downloads frequently timeout or get connection-reset.
 
 ---
 
 ### Pitfall: Duplicate CORS Headers Breaks Browser Requests
 
-See [`docs/shared/china-infra-patterns.md` — Duplicate CORS Headers](../../../docs/shared/china-infra-patterns.md#duplicate-cors-headers) for symptoms and fix.
+If the backend framework (FastAPI, Express, etc.) already has its own CORS middleware (e.g., FastAPI's `CORSMiddleware`), do **NOT** also add CORS headers in nginx. Browsers reject responses with duplicate `Access-Control-Allow-Origin` headers, causing `TypeError: Failed to fetch` even though curl/Python scripts work fine (they don't enforce CORS).
+
+**Symptoms:**
+- `curl -i` shows `Access-Control-Allow-Origin: *` appearing twice
+- Browser console: `TypeError: Failed to fetch`
+- curl / Python test scripts work normally
+
+**Fix:** Remove all `add_header Access-Control-Allow-*` and `if ($request_method = OPTIONS)` blocks from nginx. Let the backend's CORS middleware handle it exclusively.
+
+```nginx
+# WRONG — nginx + backend both add CORS headers → duplicate
+location / {
+    proxy_pass http://127.0.0.1:8000/;
+    add_header Access-Control-Allow-Origin * always;       # ← REMOVE
+    add_header Access-Control-Allow-Methods "..." always;  # ← REMOVE
+    if ($request_method = OPTIONS) { return 204; }         # ← REMOVE
+}
+
+# RIGHT — only nginx proxy, backend handles CORS
+location / {
+    proxy_pass http://127.0.0.1:8000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Verification:**
+```bash
+# Should show Access-Control-Allow-Origin exactly ONCE
+curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint -o /dev/null \
+  | grep -i "access-control-allow-origin"
+```
 
 ## Common Pitfalls
 
@@ -303,6 +467,10 @@ See [`docs/shared/china-infra-patterns.md` — Duplicate CORS Headers](../../../
 6. **Telling user it works without testing** — Always curl localhost first, then curl public IP.
 7. **Weak default passwords** — Some tools require 12+ char passwords (e.g., FileBrowser v2.63+).
 8. **Duplicate CORS headers** — If backend has CORS middleware (FastAPI CORSMiddleware, Express cors()), do NOT also add CORS headers in nginx. Browsers reject duplicate `Access-Control-Allow-Origin` → `TypeError: Failed to fetch`. curl works fine because it doesn't enforce CORS. Remove nginx CORS, let backend handle it.
+9. **`docker compose up -d` blocks in terminal tool** — The terminal tool detects it as a long-lived process and blocks. Use `terminal(background=true, notify_on_complete=true)`, then `process(action='wait')`. Do NOT use `nohup`/`disown` wrappers — the terminal tool rejects those.
+10. **Adding nginx location to existing server block** — When the server already has a `server_name <IP>` block (e.g., hermes-dashboard.conf), add new `location` blocks to it instead of creating a separate `server { server_name _; }` block. Multiple `server_name _` blocks cause "conflicting server name" warnings and the first one wins, so requests to other blocks go to the default nginx server (404).
+11. **Docker port binding `127.0.0.1` vs `0.0.0.0`** — `ports: "127.0.0.1:8090:8080"` binds ONLY to localhost → `ERR_CONNECTION_REFUSED` from external clients. For services that need external access (via security group port), use `"0.0.0.0:8090:8080"` or just `"8090:8080"`. Use `127.0.0.1` only when the service should be nginx-proxied only (never direct-accessed). After changing, must `docker compose down && docker compose up -d` (not just restart) for port binding to take effect.
+12. **Memory-optimized Docker Compose for 2GB servers** — For multi-container stacks (PostgreSQL + Redis + app), add `deploy.resources.limits.memory` to each service to prevent OOM. Typical budget for 2GB: Postgres 300MB, Redis 128MB, app 512MB. Pass PostgreSQL tuning via `command:` override (`shared_buffers=64MB`, `effective_cache_size=128MB`, `max_connections=100`). For Redis: `--maxmemory 80mb --maxmemory-policy allkeys-lru`. Set `shm_size: 64mb` for PostgreSQL.
 
 ---
 
@@ -316,6 +484,7 @@ See [`docs/shared/china-infra-patterns.md` — Duplicate CORS Headers](../../../
 | Uptime Kuma | Docker | 3001 | Node.js, needs more RAM |
 | Gitea | GitHub release | 3000 | Self-hosted Git |
 | wechat-reader | GitHub clone | 9222 (CDP) | WeChat article reader. See `references/wechat-reader.md` |
+| Sub2API | Docker Compose | 8090 | AI API gateway (Claude/OpenAI/Gemini). Memory-optimized for 2GB. See `references/sub2api-deployment.md` + `references/sub2api-api.md` |
 | CloakBrowser | pip + GitHub binary | N/A | Stealth Chromium for automation. See `references/cloakbrowser-install.md` |
 
 For 2C2G machines, prefer Go binaries over Docker/Node.js services.
