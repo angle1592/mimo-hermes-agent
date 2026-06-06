@@ -16,6 +16,8 @@ Read WeChat public account articles (`mp.weixin.qq.com`) via `wechat-reader` + p
 
 **For initial installation**, see `references/installation.md` in this skill directory.
 
+**For general CDP automation** (non-WeChat tasks like Bilibili login), see `references/vnc-cdp-automation.md`.
+
 ## Quick Usage
 
 ```bash

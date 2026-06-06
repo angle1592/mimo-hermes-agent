@@ -224,6 +224,19 @@ completion = client.chat.completions.create(
 
 **voiceclone 模型**（mimo-v2.5-tts-voiceclone）需要上传参考音频样本，未在 Hermes 工具中集成。
 
+## SOUL.md 自定义修改
+
+`~/.hermes/SOUL.md` 是 Hermes Agent 的系统提示文件，每次新会话都会作为 system prompt 加载。Hermes 更新可能覆盖此文件。
+
+**当前修改**：在末尾添加了负面表情硬约束（禁止 😅🙃😏🤣🙄💀💦🙏）。
+
+**备份位置**：`/root/mimo-hermes-agent/docs/SOUL.md`（随 repo-sync 自动同步到 GitHub）。
+
+**更新后恢复**：
+```bash
+cp /root/mimo-hermes-agent/docs/SOUL.md ~/.hermes/SOUL.md
+```
+
 ## 静态文件托管（本服务器）
 
 音频/文件可通过 nginx `/audio/` 路径对外提供：
@@ -232,7 +245,23 @@ completion = client.chat.completions.create(
 - 无需认证 (`auth_basic off`)
 - TTS 试听页: `/usr/share/nginx/html/audio/tts/index.html`
 
-FileBrowser (`/files/` 路径) 偶尔出现 404 问题，重要静态文件优先放 `/audio/` 目录。
+FileBrowser (`/files/` 路径) 偶尔出现 404 问题。常见原因：nginx 缺少 `/files/` 的 proxy 配置。修复：
+
+```bash
+cat > /etc/nginx/default.d/filebrowser.conf << 'EOF'
+location /files/ {
+    proxy_pass http://127.0.0.1:8080/files/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+EOF
+nginx -t && nginx -s reload
+```
+
+重要静态文件优先放 `/audio/` 目录（已在 nginx 中配置）。
 
 ## 迁移机会
 
