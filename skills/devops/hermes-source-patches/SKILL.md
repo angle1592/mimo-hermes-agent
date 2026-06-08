@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）和 `references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）和 `references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -42,6 +42,13 @@ git log --oneline HEAD..origin/main | wc -l
 
 # 2. 查看上游对每个被修改文件的改动
 git diff HEAD..origin/main -- <file>
+
+# 2b. 或者逐 commit 检查哪些文件被碰过（大跨度更新推荐）
+for commit in $(git log --format='%H' HEAD..origin/main); do
+  echo "=== $(git log --oneline -1 $commit) ==="
+  git diff --name-only $commit~1 $commit 2>/dev/null
+done
+# → 如果没有任何 commit 碰到 patched 文件，patch 必然无冲突
 
 # 3. 对比 patch 的改动区域和上游改动是否重叠
 grep -n "^@@" ~/.hermes/skills/devops/hermes-source-patches/references/<name>.patch
@@ -101,7 +108,10 @@ bash ~/.hermes/skills/devops/hermes-source-patches/scripts/restore-all.sh
 # 5d. 重新生成 patch: git diff <file> > references/<name>.patch
 # 5e. 清理 reject: rm -f <file>.rej
 
-# 6. 验证（关键！确认改动行数与更新前一致）
+# 6. 清理 patch 遗留文件（.orig, .rej）
+rm -f gateway/platforms/weixin.py.orig tools/*.orig tools/*.rej gateway/platforms/*.rej
+
+# 7. 验证（关键！确认改动行数与更新前一致）
 git diff --stat              # 应与更新前的输出一致
 python3 -c "import py_compile; py_compile.compile('<modified_file>', doraise=True)"
 hermes --version
@@ -148,6 +158,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
 
 5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
+
+6. **Patch 引用的函数可能从未定义** — 2026-06-09 发现 weixin patch 的 `_convert_markdown_for_weixin` 调用了 `_rewrite_table_block_for_weixin()`，但该函数从未在文件中定义（写 patch 时遗漏）。导致所有触发表格处理的微信消息发送失败（NameError，plain-text fallback 也失败）。**教训**：apply patch 后不仅要检查语法（`py_compile`），还要用 `grep -n` 确认 patch 中调用的每个外部函数确实存在于文件中。恢复脚本也应加此检查。
 
 ## 新增修改的规范
 

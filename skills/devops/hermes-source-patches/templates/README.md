@@ -13,7 +13,7 @@
 
 ### 2. weixin-markdown-passthrough.patch
 - **文件**: `gateway/platforms/weixin.py`
-- **改了什么**: `format_message()` 中的 `_normalize_markdown_blocks(content)` 替换为 `_convert_markdown_for_weixin(content)`，保留外层包装
+- **改了什么**: `format_message()` 中的 `_normalize_markdown_blocks(content)` 替换为 `_convert_markdown_for_weixin(content)`，保留外层包装。同时新增 `_rewrite_table_block_for_weixin()` 辅助函数（patch 中 `_convert_markdown_for_weixin` 内部的 `_flush_table()` 调用它，将 Markdown 表格转为 `header: value | header: value` 可读格式）
 - **为什么**: 微信已原生支持 Markdown 渲染，不需要再做 normalize 转换
 - **注意**: 上游的格式管线一直在演变（v0.12: `_convert_markdown_for_weixin`，v0.13: `_normalize_markdown_blocks`，v0.14: `_wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(...))`），每次更新需检查 `format_message()` 的当前状态并适配外层包装
 - **更新历史**: v0.13.0 (826 commits) Hunk #2 失败 — 上游新增 `_wrap_copy_friendly_lines_for_weixin()` 包装层，手动适配。v0.14.0 (409 commits) 同一 hunk 再次因包装层偏移失败，同样手动保留外层包装、替换内层函数

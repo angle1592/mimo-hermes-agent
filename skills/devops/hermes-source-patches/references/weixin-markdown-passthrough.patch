@@ -1,11 +1,40 @@
 diff --git a/gateway/platforms/weixin.py b/gateway/platforms/weixin.py
-index 613c8283b..b7e9bbe25 100644
+index b1247d8ea..a62f8ceba 100644
 --- a/gateway/platforms/weixin.py
 +++ b/gateway/platforms/weixin.py
-@@ -914,6 +914,128 @@ def _pack_markdown_blocks_for_weixin(content: str, max_length: int) -> List[str]
+@@ -876,6 +876,157 @@ def _pack_markdown_blocks_for_weixin(content: str, max_length: int) -> List[str]
      return packed
  
  
++def _rewrite_table_block_for_weixin(table_lines: List[str]) -> str:
++    """Convert a Markdown table block into a readable list for WeChat.
++
++    Parses header + separator + data rows and returns one line per data row
++    formatted as: header1: val1 | header2: val2 | ...
++    """
++    headers: List[str] = []
++    rows: List[List[str]] = []
++    for line in table_lines:
++        cells = _split_table_row(line)
++        # Skip separator rows (all cells are dashes/colons)
++        if all(re.match(r'^:?-+:?$', c) for c in cells if c):
++            continue
++        if not headers:
++            headers = cells
++        else:
++            rows.append(cells)
++    if not headers:
++        return "\n".join(table_lines)
++    out_lines: List[str] = []
++    for row in rows:
++        parts: List[str] = []
++        for i, h in enumerate(headers):
++            val = row[i] if i < len(row) else ""
++            parts.append(f"{h}: {val}")
++        out_lines.append(" | ".join(parts))
++    return "\n".join(out_lines)
++
++
 +def _convert_markdown_for_weixin(content: str) -> str:
 +    """Convert Markdown to WeChat-friendly plain text.
 +
@@ -131,7 +160,7 @@ index 613c8283b..b7e9bbe25 100644
  def _split_text_for_weixin_delivery(
      content: str, max_length: int, split_per_line: bool = False,
  ) -> List[str]:
-@@ -2067,7 +2189,7 @@ class WeixinAdapter(BasePlatformAdapter):
+@@ -2254,7 +2405,7 @@ class WeixinAdapter(BasePlatformAdapter):
      def format_message(self, content: Optional[str]) -> str:
          if content is None:
              return ""

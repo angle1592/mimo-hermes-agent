@@ -1,8 +1,8 @@
 diff --git a/tools/send_message_tool.py b/tools/send_message_tool.py
-index d5b2c0c78..3dabe3fc1 100644
+index 836080443..382311289 100644
 --- a/tools/send_message_tool.py
 +++ b/tools/send_message_tool.py
-@@ -1598,18 +1598,83 @@ async def _send_homeassistant(token, extra, chat_id, message):
+@@ -1489,18 +1489,83 @@ async def _send_matrix_via_adapter(pconfig, chat_id, message, media_files=None,
  
  
  async def _send_dingtalk(extra, chat_id, message):

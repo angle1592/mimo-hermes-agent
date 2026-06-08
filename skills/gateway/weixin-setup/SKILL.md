@@ -248,6 +248,7 @@ See `references/weixin-markdown-rendering.md` for investigation notes.
 - **SSL verification failure** — Tencent's iLink server may not verify against some CA stores. `certifi` package helps; install with `pip install certifi`.
 - **Token not persisting** — Check `~/.hermes/.env` has `WEIXIN_TOKEN=` and `WEIXIN_ACCOUNT_ID=`.
 - **Bot not responding** — Check gateway logs: `grep -i weixin ~/.hermes/logs/gateway.log | tail -20`
+- **"My message was lost / bot didn't receive it"** — Almost always caused by the user sending `/stop` before the response finished. The `/stop` command interrupts the in-progress reply, making it look like the message was never received. Check session records (`session_search`) to confirm the message WAS received and a response was generated. Explain to the user: "Your message was received and processed, but `/stop` interrupted the reply before it could be delivered."
 
 ## User FAQ (for explaining to users before setup)
 

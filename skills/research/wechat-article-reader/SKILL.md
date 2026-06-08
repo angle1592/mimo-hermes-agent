@@ -53,23 +53,11 @@ Key files:
 
 Check cookie status:
 ```bash
-cd /opt/wechat-reader && uv run python3 << 'PYEOF'
-from playwright.sync_api import sync_playwright
-from datetime import datetime
-with sync_playwright() as p:
-    browser = p.chromium.connect_over_cdp('http://127.0.0.1:9222')
-    for c in browser.contexts[0].cookies():
-        if c['name'] == 'poc_sid':
-            exp = c.get('expires', -1)
-            if exp > 0:
-                days = (exp - datetime.now().timestamp()) / 86400
-                print(f"poc_sid expires in {days:.1f} days ({datetime.fromtimestamp(exp)})")
-            else:
-                print("poc_sid: session cookie")
-            break
-    browser.close()
-PYEOF
+cd /opt/wechat-reader && uv run python3 check_cookies.py
 ```
+The `check_cookies.py` script uses raw websocket CDP (see `references/cdp-websocket-fallback.md`). Playwright's `connect_over_cdp` may fail with HTTP 400 — see Pitfalls.
+
+**Important:** Do NOT use bash heredocs (`<< 'PYEOF'`) for multi-line Python scripts containing `&` — bash interprets `&` as backgrounding. Write scripts to a `.py` file first, then execute with `uv run python3 <file>`.
 
 ## Re-verification Workflow
 
@@ -93,6 +81,12 @@ When `wechat-reader` returns `captcha_required`:
        print(f"URL: {page.url}")
    PYEOF
    ```
+   **If Playwright fails with 400**, use the raw CDP websocket approach (see `references/cdp-websocket-fallback.md`) to send `Page.navigate` directly:
+   ```python
+   # After getting ws_url from /json/version, connect and navigate:
+   ws_send(sock, {"method": "Target.createTarget", "params": {"url": "<ARTICLE_URL>"}})
+   ```
+   Or use curl: `curl -s -X PUT "http://localhost:9222/json/new?<ARTICLE_URL>"`
    The page will redirect to `mp.weixin.qq.com/mp/wappoc_appmsgcaptcha?...` — this is the Tencent captcha page.
 3. Tell user to open noVNC and drag the slider:
    ```
@@ -174,4 +168,6 @@ A daily cron job (`wechat-reader-cookies-check`) runs at 9:00 AM to:
 - **Automated captcha solving is NOT feasible** — Tencent drag captcha has anti-automation measures. Manual verification via noVNC is the only reliable approach.
 - **`pkill -9` may kill parent shell** — On some setups, `pkill -9 -f chrome` kills the terminal session too. Use specific PIDs: `ps aux | grep chrome | grep -v grep | awk '{print $2}' | xargs kill -9` instead.
 - **`send_message` tool can't send WeChat media** — The weixin adapter requires `WEIXIN_HOME_CHANNEL` to be set for outbound media. For screenshots, host on nginx (`/audio/` path, `auth_basic off`) and send the URL instead.
+- **Playwright `connect_over_cdp` fails with HTTP 400** — Even when `curl http://127.0.0.1:9222/json/version` works fine, Playwright's `connect_over_cdp('http://127.0.0.1:9222')` can return `Unexpected status 400`. This is a version/protocol mismatch between Playwright and the installed Chrome (e.g. Chrome 147+). **Fallback:** Use raw websocket CDP client via Python stdlib — see `references/cdp-websocket-fallback.md`. The `check_cookies.py` script at `/opt/wechat-reader/check_cookies.py` already uses this approach.
+- **Python heredocs with `&` break in bash** — Bash interprets `&` inside `<< 'PYEOF'` as backgrounding operators, causing silent failures or `-1` exit codes. Always write Python scripts to a `.py` file and execute with `uv run python3 <file>` instead of using heredocs.
 - **Chromium path version-specific** — `/root/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome` may change on playwright update. Check with: `find /root/.cache/ms-playwright -name chrome -type f`
