@@ -1027,6 +1027,14 @@ The output or behavior depends entirely on that deployment's custom tooling.
 
 ---
 
+## Skill Authoring
+
+For authoring in-repo SKILL.md files (frontmatter, validator, structure, directory placement), see `references/skill-authoring.md`. Key points:
+- Two locations: user-local (`~/.hermes/skills/`) via `skill_manage(action='create')`, or in-repo (`skills/<category>/<name>/`) via `write_file` + `git add`
+- Required frontmatter: `name`, `description` (≤1024 chars)
+- Aim for 8-15k chars; split into `references/*.md` if pushing past 20k
+- Validate locally before committing
+
 ## Where to Find Things
 
 | Looking for... | Location |
