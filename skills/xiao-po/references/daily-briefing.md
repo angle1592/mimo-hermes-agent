@@ -10,8 +10,8 @@
 
 **搜索源优先级**：
 1. DuckDuckGo (`ddgs news -k '...' -m 10`) — 国际新闻首选
-2. Hacker News (`news.ycombinator.com`) — 技术社区热点
-3. GitHub Trending (`github.com/trending`) — 开源项目
+2. **HN Firebase API** (`hacker-news.firebaseio.com`) — 技术社区热点（网页版超时，但 API 可用）
+3. GitHub Trending (`github.com/trending`) — 开源项目（必须带 User-Agent）
 4. 36氪 AI 频道 (`36kr.com/information/AI`) — 中文 AI 资讯
 5. 36氪快讯 (`36kr.com/newsflashes`) — 中文科技快讯
 
@@ -21,12 +21,23 @@
 | 源 | 可用性 | 备注 |
 |---|---|---|
 | DuckDuckGo | ❌ 经常超时 | DNS/连接问题 |
-| Hacker News | ❌ 经常超时 | 国际站连接慢 |
-| GitHub | ❌ 经常超时 | 需要代理 |
+| Hacker News *网页* | ❌ 经常超时 | 国际站连接慢 |
+| **HN Firebase API** | ✅ **可靠** | `hacker-news.firebaseio.com` 1-2秒响应 |
+| GitHub Trending | ⚠️ 需要 User-Agent | 不带 UA 会返回登录页 |
 | Baidu | ⚠️ 有验证码 | 搜索结果页触发安全验证 |
 | **36kr.com** | ✅ **可靠** | 国内站，始终可用 |
 
-**Fallback 策略**：如果前几个源超时，直接用 36kr.com 的 AI 频道和快讯页面。浏览器方式 (`browser_navigate`) 比 `curl` 更可靠（36kr 是 SPA）。
+**HN Firebase API 用法**（2026-06-20 验证可用）：
+```bash
+# 获取热门故事 ID 列表
+curl -sL --max-time 20 'https://hacker-news.firebaseio.com/v0/topstories.json'
+
+# 获取单个故事详情
+curl -sL --max-time 8 'https://hacker-news.firebaseio.com/v0/item/{id}.json'
+# 返回: {"title":"...","url":"...","score":123,"descendants":45}
+```
+
+**Fallback 策略**：DDG（1次尝试，超时则跳过）→ HN Firebase API → GitHub Trending → 36kr.com → "今天网络不太好"
 
 ### 3. 内容筛选
 从搜索结果中挑选 **最多 3 条**，按以下优先级：
