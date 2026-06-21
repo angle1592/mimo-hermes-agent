@@ -24,19 +24,25 @@ if [ -f "$REFS_DIR/dingtalk-proactive-send.patch" ]; then
     patch -p1 --forward < "$REFS_DIR/dingtalk-proactive-send.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
 fi
 
-# 2. WeChat Markdown 转换
-if [ -f "$REFS_DIR/weixin-markdown-conversion.patch" ]; then
-    echo "📌 微信 Markdown 转换..."
-    patch -p1 --forward < "$REFS_DIR/weixin-markdown-conversion.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
+# 2. WeChat Markdown 透传
+if [ -f "$REFS_DIR/weixin-markdown-passthrough.patch" ]; then
+    echo "📌 微信 Markdown 透传..."
+    patch -p1 --forward < "$REFS_DIR/weixin-markdown-passthrough.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
 fi
 
-# 3. Delegate tool 修改
+# 3. WeChat Dedup 竞态修复
+if [ -f "$REFS_DIR/weixin-dedup-race-fix.patch" ]; then
+    echo "📌 微信去重竞态修复..."
+    patch -p1 --forward < "$REFS_DIR/weixin-dedup-race-fix.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
+fi
+
+# 4. Delegate tool 修改
 if [ -f "$REFS_DIR/delegate-tool.patch" ]; then
     echo "📌 子代理工具修改..."
     patch -p1 --forward < "$REFS_DIR/delegate-tool.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
 fi
 
-# 4. Xiaomi TTS 自定义工具（新文件）
+# 5. Xiaomi TTS 自定义工具（新文件）
 if [ -f "$REFS_DIR/xiaomi_tts_tool.py.bak" ]; then
     echo "📌 小米 TTS 工具..."
     if [ ! -f "$HERMES_DIR/tools/xiaomi_tts_tool.py" ]; then

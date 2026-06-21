@@ -16,13 +16,13 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）和 `references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）、`references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）和 v0.16.0→v0.17.0（1320 commits，dingtalk 适配器迁移到 plugins/ 需手动在新位置重写 patch）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
 | 文件 | Patch | 用途 |
 |------|-------|------|
-| `tools/send_message_tool.py` | references/dingtalk-proactive-send.patch | 钉钉群主动发消息（Robot OpenAPI） |
+| `plugins/platforms/dingtalk/adapter.py` | references/dingtalk-proactive-send.patch | 钉钉群主动发消息（Robot OpenAPI） |
 | `gateway/platforms/weixin.py` | references/weixin-markdown-conversion.patch | 微信 Markdown→纯文本转换（旧，已被 passthrough 替代） |
 | `gateway/platforms/weixin.py` | references/weixin-markdown-passthrough.patch | 微信 Markdown 透传（替换 normalize 为 convert，保留外层包装） |
 | `tools/delegate_tool.py` | references/delegate-tool.patch | 子代理模型 debug 日志 |
@@ -137,6 +137,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 
 ## Pitfalls
 
+0. **先对比上游源码，再下结论** — 用户教训：发现微信重复回复 bug 时，我直接断言"这是原项目的 bug"。用户提醒"你最好看看 GitHub 上的源码"。对比后确认确实是上游 bug，但正确流程应该是：先 `git clone --depth 1` 拉上游代码，`diff` 对比被修改文件，确认本地 patch 没有引入问题后再归因。不要凭推测下结论。
+
 1. **`hermes --version` 在 mirror pull 后仍显示 "X commits behind"** — 当使用 `git pull https://githubfast.com/... main`（中国镜像）更新时，HEAD 已经是最新的，但 `hermes --version` 的 "commits behind" 检查对比的是 `origin/main` tracking ref（指向 GitHub 原始仓库），而不是 FETCH_HEAD。所以版本信息仍显示落后。不影响实际运行（代码已更新），但会让用户困惑。修复：更新后执行 `git fetch origin` 同步 origin ref，或告知用户这是显示问题不影响功能。验证实际版本用 `git log --oneline -1`。
 
 2. **先查根因，再打补丁** — 用户教训：发现压缩模型上下文检测错误时，我直接加了 config 覆盖，用户问"为什么不去查查到底是什么模型、哪个供应商？"正确流程：先追踪实际调用链（provider/base_url/resolution chain），搞清楚错误值从哪来，再决定修法。config 覆盖是兜底手段，不是首选。
@@ -160,6 +162,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 5. **新版本可能改变适配器架构** — 如 v0.12.0 的平台插件化。需要额外检查 patch 目标文件是否被重构（函数签名、导入路径等）。
 
 6. **Patch 引用的函数可能从未定义** — 2026-06-09 发现 weixin patch 的 `_convert_markdown_for_weixin` 调用了 `_rewrite_table_block_for_weixin()`，但该函数从未在文件中定义（写 patch 时遗漏）。导致所有触发表格处理的微信消息发送失败（NameError，plain-text fallback 也失败）。**教训**：apply patch 后不仅要检查语法（`py_compile`），还要用 `grep -n` 确认 patch 中调用的每个外部函数确实存在于文件中。恢复脚本也应加此检查。
+
+7. **patch 文件中的绝对路径被拒绝** — `patch` 命令对包含 `/usr/local/...` 等绝对路径的文件名会报 `Ignoring potentially dangerous file name` 然后无法找到文件。**解决**：用 Hermes 的 `patch` 工具（mode=replace）直接编辑源码，不依赖 shell `patch` 命令。或者将 patch 文件的路径改为相对路径后再用 `patch -p1`。记录 patch 文件只作为变更文档，实际恢复用 `restore-all.sh` 脚本或直接用 Hermes patch 工具。
 
 ## 新增修改的规范
 

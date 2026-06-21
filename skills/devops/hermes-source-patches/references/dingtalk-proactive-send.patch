@@ -1,23 +1,26 @@
-diff --git a/tools/send_message_tool.py b/tools/send_message_tool.py
-index 836080443..382311289 100644
---- a/tools/send_message_tool.py
-+++ b/tools/send_message_tool.py
-@@ -1489,18 +1489,83 @@ async def _send_matrix_via_adapter(pconfig, chat_id, message, media_files=None,
+diff --git a/plugins/platforms/dingtalk/adapter.py b/plugins/platforms/dingtalk/adapter.py
+index 29abe98ec..0c0b42aa6 100644
+--- a/plugins/platforms/dingtalk/adapter.py
++++ b/plugins/platforms/dingtalk/adapter.py
+@@ -1533,23 +1533,91 @@ async def _standalone_send(
+     media_files=None,
+     force_document=False,
+ ):
+-    """Out-of-process DingTalk delivery via a static robot webhook URL.
++    """Out-of-process DingTalk delivery via Robot OpenAPI (proactive) with webhook fallback.
  
- 
- async def _send_dingtalk(extra, chat_id, message):
--    """Send via DingTalk robot webhook.
-+    """Send via DingTalk Robot OpenAPI (proactive) with webhook fallback.
- 
--    Note: The gateway's DingTalk adapter uses per-session webhook URLs from
--    incoming messages (dingtalk-stream SDK).  For cross-platform send_message
--    delivery we use a static robot webhook URL instead, which must be
--    configured via ``DINGTALK_WEBHOOK_URL`` env var or ``webhook_url`` in the
--    platform's extra config.
+     Implements the standalone_sender_fn contract so deliver=dingtalk cron jobs
+-    succeed when cron runs separately from the gateway. The live adapter uses
+-    per-session webhook URLs from incoming messages, which aren't available
+-    out-of-process; this path uses the static DINGTALK_WEBHOOK_URL / extra
+-    webhook_url instead. Replaces the legacy _send_dingtalk helper.
++    succeed when cron runs separately from the gateway.
++
 +    Priority:
-+    1. Robot OpenAPI proactive send (uses client_id/client_secret from extra)
++    1. Robot OpenAPI proactive send (uses client_id/client_secret)
 +    2. Static webhook URL (DINGTALK_WEBHOOK_URL or webhook_url in extra)
      """
+     extra = getattr(pconfig, "extra", {}) or {}
      try:
          import httpx
      except ImportError:
@@ -81,7 +84,7 @@ index 836080443..382311289 100644
 +                                    return {"error": f"DingTalk permission missing. Go to open-dev.dingtalk.com → 权限管理, search and apply: {scopes[0]}"}
 +                            except Exception:
 +                                pass
-+                            return {"error": f"DingTalk API 403: missing robot proactive messaging permission"}
++                            return {"error": "DingTalk API 403: missing robot proactive messaging permission"}
 +                        else:
 +                            body_text = await send_resp.aread()
 +                            return {"error": f"DingTalk API error: HTTP {send_resp.status_code} {body_text[:200].decode()}"}
@@ -92,3 +95,8 @@ index 836080443..382311289 100644
      try:
          webhook_url = extra.get("webhook_url") or os.getenv("DINGTALK_WEBHOOK_URL", "")
          if not webhook_url:
+-            return {"error": "DingTalk not configured. Set DINGTALK_WEBHOOK_URL env var or webhook_url in dingtalk platform extra config."}
++            return {"error": "DingTalk not configured. Set DINGTALK_CLIENT_ID/DINGTALK_CLIENT_SECRET or DINGTALK_WEBHOOK_URL env var."}
+         async with httpx.AsyncClient(timeout=30.0) as client:
+             resp = await client.post(
+                 webhook_url,

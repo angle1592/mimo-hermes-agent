@@ -1,0 +1,71 @@
+diff --git a/gateway/platforms/weixin.py b/gateway/platforms/weixin.py
+index 1234567..abcdefg 100644
+--- a/gateway/platforms/weixin.py
++++ b/gateway/platforms/weixin.py
+@@ -1159,6 +1159,10 @@
+         self._send_session: Optional[aiohttp.ClientSession] = None
+         self._poll_task: Optional[asyncio.Task] = None
+         self._dedup = MessageDeduplicator(ttl_seconds=MESSAGE_DEDUP_TTL_SECONDS)
++        # Time-based content dedup: maps (sender_id, text_hash) -> timestamp.
++        # Catches duplicates even when message_ids differ and closes the race
++        # window in the MessageDeduplicator check-then-register pattern.
++        self._recent_content: Dict[str, float] = {}
+ 
+         self._account_id = str(extra.get("account_id") or os.getenv("WEIXIN_ACCOUNT_ID", "")).strip()
+@@ -1410,18 +1414,51 @@
+         message_id = str(message.get("message_id") or "").strip()
+         item_list = message.get("item_list") or []
+         text = _extract_text(item_list)
+-        if message_id and self._dedup.is_duplicate(message_id):
+-            return
+-
+-        # Secondary content-fingerprint dedup for text messages
+-        if text:
+-            content_key = f"content:{sender_id}:{hashlib.md5(text.encode()).hexdigest()}"
+-            if self._dedup.is_duplicate(content_key):
+-                logger.debug("[%s] Content-dedup: skipping duplicate message from %s", self.name, sender_id)
++
++        # Compute a stable dedup text using only the user's own text,
++        # NOT including ref_msg context. The iLink API may return the same
++        # message twice with different ref_msg metadata, causing _extract_text
++        # to produce different strings. Stripping the ref prefix ensures both
++        # copies produce the same dedup key.
++        _dedup_text = text
++        for _ref_prefix in ("[引用媒体: ", "[引用媒体]", "[引用: "):
++            if _dedup_text.startswith(_ref_prefix):
++                _nl = _dedup_text.find("\n")
++                if _nl != -1:
++                    _dedup_text = _dedup_text[_nl + 1:]
++                break
++        content_key = f"content:{sender_id}:{hashlib.md5(_dedup_text.encode()).hexdigest()}" if _dedup_text else ""
++
++        if message_id and self._dedup.is_duplicate(message_id):
++            logger.info("[%s] Msg-id-dedup: skipping msg_id=%s from %s", self.name, _safe_id(message_id), _safe_id(sender_id))
++            return
++
++        # Secondary content-fingerprint dedup for text messages
++        if _dedup_text:
++            if self._dedup.is_duplicate(content_key):
++                logger.info("[%s] Content-dedup: skipping duplicate from %s text=%r", self.name, _safe_id(sender_id), _dedup_text[:40])
+                 return
++
++        # Tertiary: time-window content dedup.
++        # Unlike MessageDeduplicator (check-then-register), this dict is
++        # checked and written in a single synchronous step, eliminating any
++        # race window where two tasks from the same poll both pass the
++        # content_key check before either registers.
++        if _dedup_text:
++            _text_hash = hashlib.md5(_dedup_text.encode()).hexdigest()[:16]
++            _rc_key = f"{sender_id}:{_text_hash}"
++            _now = time.time()
++            _rc_prev = self._recent_content.get(_rc_key)
++            if _rc_prev is not None and _now - _rc_prev < 5.0:
++                logger.info("[%s] Time-window-dedup: skipping duplicate from %s text=%r (prev %.1fs ago)", self.name, _safe_id(sender_id), _dedup_text[:40], _now - _rc_prev)
++                return
++            self._recent_content[_rc_key] = _now
++            # Prune stale entries (keep dict bounded)
++            if len(self._recent_content) > 500:
++                cutoff = _now - 10.0
++                self._recent_content = {k: v for k, v in self._recent_content.items() if v > cutoff}
+ 
+         chat_type, effective_chat_id = _guess_chat_type(message, self._account_id)

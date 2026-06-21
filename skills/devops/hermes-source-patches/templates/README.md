@@ -6,10 +6,11 @@
 ## 修改清单
 
 ### 1. dingtalk-proactive-send.patch
-- **文件**: `tools/send_message_tool.py`
-- **改了什么**: `_send_dingtalk()` 优先通过 Robot OpenAPI 发送主动消息
+- **文件**: `plugins/platforms/dingtalk/adapter.py`（v0.17.0 起从 `tools/send_message_tool.py` 迁移到插件）
+- **改了什么**: `_standalone_send()` 优先通过 Robot OpenAPI 发送主动消息
 - **为什么**: 默认 webhook 只能被动回复，无法主动发消息给群
 - **流程**: client_id/client_secret → OAuth token → POST /v1.0/robot/groupMessages/send，失败回退 webhook
+- **更新历史**: v0.17.0 (1320 commits) 上游将 dingtalk 适配器从 `tools/send_message_tool.py` 迁移到 `plugins/platforms/dingtalk/adapter.py`，旧 patch 目标文件失效，手动在新位置重新应用
 
 ### 2. weixin-markdown-passthrough.patch
 - **文件**: `gateway/platforms/weixin.py`
@@ -35,6 +36,23 @@
 - **为什么**: run_agent.py 传错 provider，OpenRouter 免费档返回 131K 阉割值
 - **详情**: `references/compression-context-provider-bug.md`
 - **注意**: 换压缩模型时需同步修改或删除此配置
+
+### 6. weixin-dedup-race-fix.patch
+- **文件**: `gateway/platforms/weixin.py`
+- **改了什么**: (a) `_process_message()` 中用去掉 `[引用:…]`/`[引用媒体:…]` 前缀的纯用户文本计算 content_key（稳定 dedup key）；(b) 新增第三层去重（time-window content dedup），`_recent_content` dict 在同一同步步骤中完成检查+注册，5 秒窗口内同 sender 同 text 直接丢弃；(c) dedup 日志从 DEBUG 提升到 INFO
+- **为什么**: iLink getupdates API 把同一条消息返回两次（不同 message_id），且两次返回的 `ref_msg` 元数据可能不同 → `_extract_text()` 提取的文本不同 → 原有 content_key 不同 → 去重失败 → 重复回复
+- **根因细节**: 原有 content_key 基于 `_extract_text()` 的完整输出（含引用文本前缀），但 iLink 两次返回同一消息时 ref_msg 内容可能不一致。修复后 content_key 只用 `\n` 之后的纯用户文本计算 hash，确保两次返回产生相同的 dedup key
+- **时间窗口原理**: `_recent_content[sender:text_hash]` → check+write 是原子操作（无 await 点），消除 MessageDeduplicator check-then-register 的竞态窗口
+- **更新历史**: v0.17.0 首次添加（2026-06-21），后于 2026-06-21 补充 ref_msg 前缀剥离逻辑
+- **上游相关 PR**: #16646（content dedup with time buckets, 60s window, SHA-256）、#32406（write-before-process race fix）。两者均为 open 状态（截至 2026-06-21），均未覆盖 ref_msg 导致 content_key 不一致的问题。如需提 PR 向上游贡献，建议在 #16182 下补充 ref_msg 角度
+
+## 调试工作流
+
+1. **先诊断，后打补丁** — 用户明确要求"先不改，查明具体原因"。先加 WARNING 级诊断日志（记录原始字段如 message_id、content_key 等），重启观察，确认根因后再写 patch。
+2. **改完要自查** — 用户会要求"再检查一下"。patch 后重新读修改区域，验证语法、逻辑、边界条件。
+3. **注意当前 bug 对操作的影响** — 如重复回复 bug 可能导致 agent 自己的操作被执行两次，需要在回复中提醒用户。
+4. **先对比上游源码，再归因** — 发现 bug 时，先 `git clone --depth 1 https://github.com/NousResearch/hermes-agent.git /tmp/hermes-upstream` 拉上游代码，`diff` 对比被修改文件，确认本地 patch 没有引入问题后再归因是上游 bug。不要凭推测下结论。
+5. **提 PR 前先搜现有 issue/PR** — 用 GitHub API 搜索：`curl -s "https://api.github.com/search/issues?q=repo:NousResearch/hermes-agent+<关键词>"`。已有 PR 时在相关 issue 下评论补充新发现的角度（如 ref_msg 导致 content_key 不一致），而非重复提 PR。
 
 ## 注意事项
 
