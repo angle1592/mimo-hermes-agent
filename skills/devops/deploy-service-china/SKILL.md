@@ -14,6 +14,7 @@ metadata:
       - references/fastapi-mariadb.md
       - references/cloakbrowser-install.md
       - references/ssh-reverse-tunnel-proxy.md
+      - references/bis-neer-api.md
 ---
 
 # Deploy Services in China (Alibaba Cloud Linux)
@@ -471,7 +472,8 @@ curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint 
 10. **Adding nginx location to existing server block** — When the server already has a `server_name <IP>` block (e.g., hermes-dashboard.conf), add new `location` blocks to it instead of creating a separate `server_name _` block. Multiple `server_name _` blocks cause "conflicting server name" warnings and the first one wins, so requests to other blocks go to the default nginx server (404). Also check if the server block has `auth_basic` — new locations inherit it. Add `auth_basic off;` to each public location, otherwise users get a 401 login popup.
 11. **Docker port binding `127.0.0.1` vs `0.0.0.0`** — `ports: "127.0.0.1:8090:8080"` binds ONLY to localhost → `ERR_CONNECTION_REFUSED` from external clients. For services that need external access (via security group port), use `"0.0.0.0:8090:8080"` or just `"8090:8080"`. Use `127.0.0.1` only when the service should be nginx-proxied only (never direct-accessed). After changing, must `docker compose down && docker compose up -d` (not just restart) for port binding to take effect.
 12. **External API domains may redirect** — APIs behind Cloudflare frequently change domains (e.g., `api.frankfurter.app` → `api.frankfurter.dev` with `/v1/` prefix). Before writing nginx proxy_pass, always test with `curl -sIL` to check for 301 redirects and follow the chain to the final URL. Use that final domain in proxy_pass.
-13. **Static site + API proxy pattern** — For frontend-only sites calling external APIs, use nginx `alias` for static files + separate `proxy_pass` for API. See `references/static-site-api-proxy.md` for the full pattern.
+14. **Static site + API proxy pattern** — For frontend-only sites calling external APIs, use nginx `alias` for static files + separate `proxy_pass` for API. See `references/static-site-api-proxy.md` for the full pattern.
+15. **PM2 for Node.js services** — For Node.js apps (SillyTavern, Uptime Kuma, etc.), use PM2 instead of raw systemd: `npx pm2 start app.js --name NAME && npx pm2 save && npx pm2 startup`. First boot may be slow (frontend compilation) — wait 20s before checking port. **SillyTavern specific:** MUST enable `basicAuthMode: true` when `listen: true` — disabling whitelist without enabling auth causes crash loop. See `references/sillytavern-pm2.md`.
 14. **Memory-optimized Docker Compose for 2GB servers** — For multi-container stacks (PostgreSQL + Redis + app), add `deploy.resources.limits.memory` to each service to prevent OOM. Typical budget for 2GB: Postgres 300MB, Redis 128MB, app 512MB. Pass PostgreSQL tuning via `command:` override (`shared_buffers=64MB`, `effective_cache_size=128MB`, `max_connections=100`). For Redis: `--maxmemory 80mb --maxmemory-policy allkeys-lru`. Set `shm_size: 64mb` for PostgreSQL.
 
 ---
@@ -488,7 +490,9 @@ curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint 
 | wechat-reader | GitHub clone | 9222 (CDP) | WeChat article reader. See `references/wechat-reader.md` |
 | Sub2API | Docker Compose | 8090 | AI API gateway (Claude/OpenAI/Gemini). Memory-optimized for 2GB. See `references/sub2api-deployment.md` + `references/sub2api-api.md` |
 | Static Site + API Proxy | nginx alias + proxy_pass | 80 (subpath) | Frontend-only sites calling external APIs. See `references/static-site-api-proxy.md` |
+| BIS NEER Data | SDMX REST API (CSV) | N/A | Effective exchange rate indices. nginx proxy + CSV parser. See `references/bis-neer-api.md` |
 | CloakBrowser | pip + GitHub binary | N/A | Stealth Chromium for automation. See `references/cloakbrowser-install.md` |
+| SillyTavern | GitHub clone + npm | 8002 | LLM chat frontend (Node.js). Use PM2 for process management. See `references/sillytavern-pm2.md` |
 
 For 2C2G machines, prefer Go binaries over Docker/Node.js services.
 

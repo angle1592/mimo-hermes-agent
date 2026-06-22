@@ -94,7 +94,110 @@ location /fx-api/ {
 }
 ```
 
-**Limitation:** ECB publishes rates once per day (around 16:00 CET, weekdays only). No free API provides hourly/intraday CNY/JPY data without registration. Alpha Vantage demo key is rate-limited, Twelve Data requires paid key.
+**Limitation:** ECB publishes rates once per day (around 16:00 CET, weekdays only). On weekends and ECB holidays, the latest rate stalls at the previous business day. See "Multi-Source Fallback" below for the fix.
+
+## Multi-Source Fallback (Weekend/Holiday Data Staleness)
+
+When the primary API (Frankfurter/ECB) goes stale on weekends, add a secondary source and auto-pick the newer one.
+
+**Recommended secondary source: open.er-api.com**
+- Free, no API key, no rate limits
+- Updates daily including weekends
+- Response format differs from Frankfurter — needs normalization
+
+```nginx
+# Add a second proxy location for the alt API
+location /fx-api2/ {
+    auth_basic off;
+    proxy_pass https://open.er-api.com/v6/;
+    proxy_ssl_server_name on;
+    proxy_set_header Host open.er-api.com;
+    proxy_read_timeout 15;
+}
+```
+
+**Frontend pattern — fetch both, pick newer:**
+
+```js
+const PROXY  = '/fx-api';   // Frankfurter (ECB, weekdays)
+const PROXY2 = '/fx-api2';  // open.er-api (daily including weekends)
+
+// Fetch from alt source and normalize to frankfurter format
+async function fetchLatestAlt(base) {
+  const path = '/latest/' + base;
+  let data;
+  try {
+    const r = await fetch(PROXY2 + path, {signal: AbortSignal.timeout(6000)});
+    if (r.ok) data = await r.json();
+  } catch(e) {}
+  if (!data) {
+    try {
+      const r2 = await fetch('https://open.er-api.com/v6' + path, {signal: AbortSignal.timeout(10000)});
+      if (r2.ok) data = await r2.json();
+    } catch(e) {}
+  }
+  if (!data || !data.rates) return null;
+  // Normalize: open.er-api uses time_last_update_utc instead of date
+  const months = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
+                  Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  let date = '';
+  const m = (data.time_last_update_utc||'').match(/\d{2}\s+(\w{3})\s+(\d{4})/);
+  if (m) date = m[2]+'-'+months[m[1]]+'-'+data.time_last_update_utc.slice(5,7);
+  return {amount:1, base:data.base_code||base, date, rates:data.rates};
+}
+
+// Pick the response with the more recent date
+function pickNewer(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return (a.date || '') >= (b.date || '') ? a : b;
+}
+
+// In fetchAll: request both sources in parallel
+const [ffLatest, altLatest, history, ...] = await Promise.all([
+  apiFetch('/latest?from=CNY&to=JPY'),        // Frankfurter
+  fetchLatestAlt('CNY').catch(()=>null),        // open.er-api
+  apiFetch('/'+start+'..'+end+'?from=CNY&to=JPY'), // history (Frankfurter only)
+  // ... other fetches
+]);
+const latest = pickNewer(ffLatest, altLatest ? {amount:1,base:'CNY',date:altLatest.date,rates:{JPY:altLatest.rates.JPY}} : null);
+```
+
+**Backend (cron monitor) pattern:**
+
+```python
+def fetch_alt_latest(base: str) -> dict | None:
+    """Fetch from open.er-api.com, normalize to frankfurter format."""
+    try:
+        data = fetch_json(f"https://open.er-api.com/v6/latest/{base}")
+        if "rates" not in data: return None
+        import re, calendar
+        m = re.search(r"\d{2}\s+(\w{3})\s+(\d{4})", data.get("time_last_update_utc", ""))
+        date_str = ""
+        if m:
+            months = {v: f"{k:02d}" for k, v in enumerate(calendar.month_abbr) if v}
+            date_str = f"{m.group(2)}-{months.get(m.group(1), '00')}-{data['time_last_update_utc'][5:7]}"
+        return {"rates": data["rates"], "date": date_str}
+    except Exception:
+        return None
+
+# In main(): pick the newer source
+ff_latest = fetch_json(f"{API_BASE}/latest?from=CNY&to=JPY")
+alt_latest = fetch_alt_latest("CNY")
+if alt_latest and alt_latest.get("date", "") > ff_latest.get("date", ""):
+    current_rate = alt_latest["rates"]["JPY"]
+    data_date = alt_latest["date"]
+else:
+    current_rate = ff_latest["rates"]["JPY"]
+    data_date = ff_latest["date"]
+```
+
+**Key points:**
+- Keep Frankfurter for historical data (it has the time-series API `/{start}..{end}`)
+- Only use alt source for the "latest" rate display
+- `pickNewer()` compares date strings (YYYY-MM-DD lexicographic = chronological)
+- open.er-api response has `time_last_update_utc` (RFC 2822) not `date` — must normalize
+- Test both nginx proxies: `curl -s -H "Host: PUBLIC_IP" http://127.0.0.1/fx-api2/latest/CNY`
 
 **⚠ User preference: NO simulated/interpolated data.** PCHIP interpolation was explicitly rejected ("不用模拟"). If the user wants higher data density, find a real data source — do NOT use interpolation to fake it. If no free intraday API exists, the feature doesn't exist.
 
