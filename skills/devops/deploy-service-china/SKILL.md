@@ -344,21 +344,28 @@ yum install -y tigervnc-server    # provides Xvnc (display + VNC in one)
 pip install websockify
 git clone https://github.com/novnc/noVNC.git /opt/noVNC --depth 1
 
-# 1. Start Xvnc (X display + VNC server, one process)
-Xvnc :99 -geometry 1280x720 -depth 24 \
-  -SecurityTypes None -rfbport 5900 -AlwaysShared \
-  -AcceptKeyEvents -AcceptPointerEvents &
+# 1. Set VNC password (NEVER use -SecurityTypes None on public servers!)
+mkdir -p /root/.vnc
+VNC_PASS=$(openssl rand -base64 12 | head -c 12)
+echo -e "${VNC_PASS}\n${VNC_PASS}\nn" | vncpasswd /root/.vnc/passwd
+chmod 600 /root/.vnc/passwd
+echo "Save this password: $VNC_PASS"
 
-# 2. Start noVNC (WebSocket-to-VNC bridge)
+# 2. Start Xvnc WITH password authentication
+Xvnc :99 -geometry 1280x720 -depth 24 \
+  -SecurityTypes VncAuth -rfbauth /root/.vnc/passwd \
+  -rfbport 5900 -AlwaysShared &
+
+# 3. Start noVNC (WebSocket-to-VNC bridge)
 websockify --web /opt/noVNC 6080 localhost:5900 &
 
-# 3. Launch browser on virtual display
+# 4. Launch browser on virtual display
 DISPLAY=:99 chromium --remote-debugging-port=9222 \
   --user-data-dir="/root/.browser-profiles/default" \
   --no-first-run --no-default-browser-check \
   --disable-gpu --no-sandbox --window-size=1280,720 "https://target-url"
 
-# 4. Proxy through nginx (port 6080 usually blocked by security group)
+# 5. Proxy through nginx (port 6080 usually blocked by security group)
 # Add to nginx server block (before closing }):
 #     location /vnc/ {
 #         auth_basic off;
@@ -474,7 +481,8 @@ curl -s -D - -H "Origin: http://example.com" http://PUBLIC-IP:PORT/api/endpoint 
 12. **External API domains may redirect** — APIs behind Cloudflare frequently change domains (e.g., `api.frankfurter.app` → `api.frankfurter.dev` with `/v1/` prefix). Before writing nginx proxy_pass, always test with `curl -sIL` to check for 301 redirects and follow the chain to the final URL. Use that final domain in proxy_pass.
 14. **Static site + API proxy pattern** — For frontend-only sites calling external APIs, use nginx `alias` for static files + separate `proxy_pass` for API. See `references/static-site-api-proxy.md` for the full pattern.
 15. **PM2 for Node.js services** — For Node.js apps (SillyTavern, Uptime Kuma, etc.), use PM2 instead of raw systemd: `npx pm2 start app.js --name NAME && npx pm2 save && npx pm2 startup`. First boot may be slow (frontend compilation) — wait 20s before checking port. **SillyTavern specific:** MUST enable `basicAuthMode: true` when `listen: true` — disabling whitelist without enabling auth causes crash loop. See `references/sillytavern-pm2.md`.
-14. **Memory-optimized Docker Compose for 2GB servers** — For multi-container stacks (PostgreSQL + Redis + app), add `deploy.resources.limits.memory` to each service to prevent OOM. Typical budget for 2GB: Postgres 300MB, Redis 128MB, app 512MB. Pass PostgreSQL tuning via `command:` override (`shared_buffers=64MB`, `effective_cache_size=128MB`, `max_connections=100`). For Redis: `--maxmemory 80mb --maxmemory-policy allkeys-lru`. Set `shm_size: 64mb` for PostgreSQL.
+17. **noVNC without authentication = open backdoor** — `-SecurityTypes None` means anyone who discovers the port (6080 or 5900) gets full desktop access with zero authentication. Internet scanners constantly probe these ports. **Always use `-SecurityTypes VncAuth -rfbauth /root/.vnc/passwd`** and set a password with `vncpasswd` before starting Xvnc. If noVNC is only needed temporarily (e.g., QR scan login), kill both Xvnc and websockify immediately after use. Leaving them running overnight is how intrusions happen.
+18. **Memory-optimized Docker Compose for 2GB servers** — For multi-container stacks (PostgreSQL + Redis + app), add `deploy.resources.limits.memory` to each service to prevent OOM. Typical budget for 2GB: Postgres 300MB, Redis 128MB, app 512MB. Pass PostgreSQL tuning via `command:` override (`shared_buffers=64MB`, `effective_cache_size=128MB`, `max_connections=100`). For Redis: `--maxmemory 80mb --maxmemory-policy allkeys-lru`. Set `shm_size: 64mb` for PostgreSQL.
 
 ---
 

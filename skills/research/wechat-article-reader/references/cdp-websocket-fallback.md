@@ -2,9 +2,55 @@
 
 When Playwright's `connect_over_cdp('http://127.0.0.1:9222')` fails with HTTP 400, use this raw websocket approach.
 
-## Why it fails
+## Fix the root cause first
 
-Playwright does an HTTP GET to `/json/version` and expects specific response headers. Chrome versions (e.g. 147+) may return a response that Playwright's HTTP client rejects as status 400, even though `curl` sees it as valid JSON. The websocket endpoint itself works fine — it's the HTTP handshake negotiation that breaks.
+Before using this fallback, try adding `--remote-allow-origins=*` to Chrome's startup args in `/opt/wechat-reader/start-services.sh`:
+
+```bash
+DISPLAY=:99 "$CHROME_BIN" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$PROFILE_DIR" \
+  --no-first-run --no-default-browser-check \
+  --disable-gpu --no-sandbox --window-size=1280,720 \
+  --remote-allow-origins=* &
+```
+
+Then restart: `bash /opt/wechat-reader/start-services.sh`. This fixes both Playwright and raw websocket connections.
+
+## Simple approach: `websocket-client` package
+
+If the raw stdlib approach below feels heavy, use `websocket-client` instead:
+
+```bash
+cd /opt/wechat-reader && uv pip install websocket-client
+```
+
+```python
+import json, websocket, urllib.request
+from datetime import datetime
+
+targets = json.loads(urllib.request.urlopen('http://127.0.0.1:9222/json').read())
+ws_url = next((t['webSocketDebuggerUrl'] for t in targets if t.get('type') == 'page'), targets[0]['webSocketDebuggerUrl'])
+
+ws = websocket.create_connection(ws_url, timeout=10)
+ws.send(json.dumps({'id': 1, 'method': 'Network.getAllCookies'}))
+resp = json.loads(ws.recv())
+cookies = resp.get('result', {}).get('cookies', [])
+ws.close()
+
+now = datetime.now().timestamp()
+for c in cookies:
+    if c['name'] == 'poc_sid':
+        rem = (c['expires'] - now) / 86400
+        print(f'poc_sid expires in {rem:.1f} days')
+        break
+```
+
+Two failure modes:
+
+1. **HTTP 403 + "Rejected incoming WebSocket connection"** — Chrome's `--remote-allow-origins` flag is missing. Fix: add `--remote-allow-origins=*` to Chrome startup args (see above).
+
+2. **HTTP 400 from Playwright** — Playwright does an HTTP GET to `/json/version` and expects specific response headers. Chrome versions (e.g. 147+) may return a response that Playwright's HTTP client rejects as status 400, even though `curl` sees it as valid JSON. The websocket endpoint itself works fine — it's the HTTP handshake negotiation that breaks.
 
 ## Solution: Raw websocket CDP client
 
