@@ -42,16 +42,18 @@ if [ -f "$REFS_DIR/delegate-tool.patch" ]; then
     patch -p1 --forward < "$REFS_DIR/delegate-tool.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
 fi
 
-# 5. Xiaomi TTS 自定义工具（新文件）
-if [ -f "$REFS_DIR/xiaomi_tts_tool.py.bak" ]; then
-    echo "📌 小米 TTS 工具..."
-    if [ ! -f "$HERMES_DIR/tools/xiaomi_tts_tool.py" ]; then
-        cp "$REFS_DIR/xiaomi_tts_tool.py.bak" "$HERMES_DIR/tools/xiaomi_tts_tool.py"
-        echo "  ✅ 已恢复"
-    else
-        echo "  ⏭️  文件已存在，跳过（如需覆盖请手动 cp）"
-    fi
+# 5. 自定义 provider reasoning_effort 支持（gpt-5.5 / shayulajiao 等）
+if [ -f "$REFS_DIR/reasoning-effort-custom-provider-run-agent.patch" ]; then
+    echo "📌 自定义 provider reasoning 支持（run_agent）..."
+    patch -p1 --forward < "$REFS_DIR/reasoning-effort-custom-provider-run-agent.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
 fi
+
+if [ -f "$REFS_DIR/reasoning-effort-custom-provider-chat-completions.patch" ]; then
+    echo "📌 自定义 provider reasoning 支持（chat_completions）..."
+    patch -p1 --forward < "$REFS_DIR/reasoning-effort-custom-provider-chat-completions.patch" 2>/dev/null && echo "  ✅ 已应用" || echo "  ⏭️  已存在或冲突，跳过"
+fi
+
+# Xiaomi TTS 自定义工具已停用。保留 references/xiaomi_tts_tool.py.bak 作为历史记录，不再自动恢复。
 
 # 清理 pycache
 echo ""

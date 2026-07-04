@@ -1,0 +1,23 @@
+diff --git a/agent/transports/chat_completions.py b/agent/transports/chat_completions.py
+index 1985faba0..4ae53000b 100644
+--- a/agent/transports/chat_completions.py
++++ b/agent/transports/chat_completions.py
+@@ -377,6 +377,18 @@ class ChatCompletionsTransport(ProviderTransport):
+             if _lm_effort is not None:
+                 api_kwargs["reasoning_effort"] = _lm_effort
+ 
++        # Generic reasoning_effort fallback for custom/unknown providers
++        # that support reasoning but aren't Kimi, TokenHub, or LM Studio.
++        if (
++            not is_kimi and not is_tokenhub and not params.get("is_lmstudio", False)
++            and params.get("supports_reasoning", False)
++            and reasoning_config and isinstance(reasoning_config, dict)
++            and reasoning_config.get("enabled") is not False
++        ):
++            _effort = (reasoning_config.get("effort") or "").strip().lower()
++            if _effort in {"low", "medium", "high"}:
++                api_kwargs["reasoning_effort"] = _effort
++
+         # extra_body assembly
+         extra_body: dict[str, Any] = {}
+ 

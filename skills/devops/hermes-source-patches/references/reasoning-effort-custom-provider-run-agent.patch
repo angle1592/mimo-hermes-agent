@@ -1,0 +1,17 @@
+diff --git a/run_agent.py b/run_agent.py
+index 6f0d9cb1d..8e9ae1c3e 100644
+--- a/run_agent.py
++++ b/run_agent.py
+@@ -4862,6 +4862,12 @@ class AIAgent:
+             opts = self._lmstudio_reasoning_options_cached()
+             # "off-only" (or absent) means no real reasoning capability.
+             return any(opt and opt != "off" for opt in opts)
++        # Custom providers with reasoning_config are considered reasoning-capable
++        _rc = self.reasoning_config
++        if _rc and isinstance(_rc, dict) and _rc.get("enabled") is not False:
++            _effort = (_rc.get("effort") or "").strip().lower()
++            if _effort in {"low", "medium", "high"}:
++                return True
+         if "openrouter" not in self._base_url_lower:
+             return False
+         if "api.mistral.ai" in self._base_url_lower:

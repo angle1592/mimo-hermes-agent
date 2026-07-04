@@ -46,6 +46,18 @@
 - **更新历史**: v0.17.0 首次添加（2026-06-21），后于 2026-06-21 补充 ref_msg 前缀剥离逻辑
 - **上游相关 PR**: #16646（content dedup with time buckets, 60s window, SHA-256）、#32406（write-before-process race fix）。两者均为 open 状态（截至 2026-06-21），均未覆盖 ref_msg 导致 content_key 不一致的问题。如需提 PR 向上游贡献，建议在 #16182 下补充 ref_msg 角度
 
+### 7. reasoning-effort-custom-provider-run-agent.patch
+- **文件**: `run_agent.py`
+- **改了什么**: `_supports_reasoning_extra_body()` 方法新增自定义 provider 支持检查 — 当 `reasoning_config` 配置了有效的 effort（low/medium/high）且 reasoning 未被禁用时，返回 True
+- **为什么**: shayulajiao 等自定义 provider 的子代理请求中 `reasoning_effort` 没有被传给 API，因为 `_supports_reasoning_extra_body()` 只对 OpenRouter、LM Studio、Nous 等已知平台返回 True
+- **注意**: 插入位置在 LM Studio 检查之后、openrouter 检查之前，确保不干扰已有平台的 reasoning 逻辑
+
+### 8. reasoning-effort-custom-provider-chat-completions.patch
+- **文件**: `agent/transports/chat_completions.py`
+- **改了什么**: legacy 路径（非 profile 路径）新增通用 `reasoning_effort` 兜底逻辑：当 provider 不是 Kimi/TokenHub/LM Studio、但 `supports_reasoning=True` 且 `reasoning_config` 有合法 effort 值时，在 api_kwargs 顶层添加 `reasoning_effort` 参数
+- **为什么**: 自定义 provider 缺少 Kimi/TokenHub 等专属分支，导致即使 `_supports_reasoning_extra_body()` 返回 True，顶层 `reasoning_effort` 也不会被设置
+- **注意**: 插入位置在 LM Studio 处理后、extra_body 组装前，仅作用于 legacy（非 profile）路径
+
 ## 调试工作流
 
 1. **先诊断，后打补丁** — 用户明确要求"先不改，查明具体原因"。先加 WARNING 级诊断日志（记录原始字段如 message_id、content_key 等），重启观察，确认根因后再写 patch。

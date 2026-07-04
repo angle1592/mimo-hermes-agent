@@ -1,0 +1,10 @@
+--- tools/delegate_tool.py
++++ tools/delegate_tool.py
+@@ -985,6 +986,7 @@ def _build_child_agent(
+     effective_base_url = override_base_url or parent_agent.base_url
+     effective_api_key = override_api_key or parent_api_key
+     effective_api_mode = override_api_mode or getattr(parent_agent, "api_mode", None)
++
+     effective_acp_command = override_acp_command or getattr(
+         parent_agent, "acp_command", None
+     )
