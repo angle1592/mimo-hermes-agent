@@ -7,12 +7,7 @@ providers:
     base_url: https://token.sensenova.cn/v1
     key_env: SENSENOVA_API_KEY
     name: SenseNova
-  sub2api:
-    api_mode: chat_completions
-    base_url: http://localhost:8090/v1
-    key_env: SUB2API_KEY
-    name: Sub2API (ChatGPT Plus)
-    request_timeout_seconds: 120
+  sub2api: 'null'
   shayulajiao:
     api_mode: chat_completions
     base_url: https://shayulajiao.xyz/v1
