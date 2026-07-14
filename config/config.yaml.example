@@ -2,6 +2,7 @@ model:
   default: gpt-5.6-sol
   provider: shayulajiao
   reasoning_effort: high
+  context_length: 256000
 providers:
   sensenova:
     base_url: https://token.sensenova.cn/v1
