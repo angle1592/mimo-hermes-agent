@@ -494,7 +494,7 @@ cron:
     callback_url: ''
     expected_audience: ''
     nas_jwks_url: ''
-  wrap_response: true
+  wrap_response: false
 code_execution:
   mode: project
 tools:
