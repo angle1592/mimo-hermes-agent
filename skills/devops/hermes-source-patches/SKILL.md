@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）、`references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）和 v0.16.0→v0.17.0（1320 commits，dingtalk 适配器迁移到 plugins/ 需手动在新位置重写 patch）。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）、`references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）、`references/update-session-2026-07-20.md`（975 commits，隔离 worktree 预检、低内存更新、reasoning patches 因上游 CustomProfile 原生支持而退休）和 v0.16.0→v0.17.0（1320 commits，dingtalk 适配器迁移到 plugins/ 需手动在新位置重写 patch）。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -28,10 +28,10 @@ tags: [hermes, patches, source-modification]
 | `tools/delegate_tool.py` | references/delegate-tool.patch | 子代理模型 debug 日志 |
 | `tools/xiaomi_tts_tool.py` | references/xiaomi_tts_tool.py.bak | 小米 TTS 自定义工具（已停用，保留历史备份，不再自动恢复） |
 | `run_agent.py` | references/compression-context-provider-bug.md | 压缩模型上下文误用主模型 provider（v0.12.0 bug，config workaround） |
-| `run_agent.py` | references/reasoning-effort-custom-provider-run-agent.patch | 自定义 provider 的 reasoning_effort 支持（_supports_reasoning_extra_body 放宽） |
-| `agent/transports/chat_completions.py` | references/reasoning-effort-custom-provider-chat-completions.patch | 自定义 provider 的 reasoning_effort 顶层参数（legacy 路径通用兜底） |
+| `run_agent.py` | references/reasoning-effort-custom-provider-run-agent.patch | 历史备份：自定义 provider reasoning（2026-07-20 已退休，不自动恢复） |
+| `agent/transports/chat_completions.py` | references/reasoning-effort-custom-provider-chat-completions.patch | 历史备份：reasoning 顶层参数兜底（2026-07-20 已退休，不自动恢复） |
 
-当前维护结论（2026-07-04）：DingTalk proactive、Weixin Markdown passthrough、Weixin dedup race fix、custom-provider reasoning patches 仍未被上游完全吸收，应保留；delegate debug 仅用于排查，可按需保留；Xiaomi TTS 工具已停用，不再自动恢复。
+当前维护结论（2026-07-20）：DingTalk proactive、Weixin Markdown passthrough、Weixin dedup race fix 仍需保留；delegate debug 可按需保留。新版 `CustomProfile` 已原生把 `reasoning_config.effort` 映射为顶层 `reasoning_effort`，并已对 `shayulajiao` 的主模型 `high`、子代理 `xhigh` 和真实 API 请求验证通过，因此两份 custom-provider reasoning patches 已退休，只保留为历史参考。Xiaomi TTS 工具已停用，不再自动恢复。
 
 ## 更新前分析流程
 
