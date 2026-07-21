@@ -17,7 +17,7 @@
 - **改了什么**: `format_message()` 中的 `_normalize_markdown_blocks(content)` 替换为 `_convert_markdown_for_weixin(content)`，保留外层包装。同时新增 `_rewrite_table_block_for_weixin()` 辅助函数（patch 中 `_convert_markdown_for_weixin` 内部的 `_flush_table()` 调用它，将 Markdown 表格转为 `header: value | header: value` 可读格式）
 - **为什么**: 微信已原生支持 Markdown 渲染，不需要再做 normalize 转换
 - **注意**: 上游的格式管线一直在演变（v0.12: `_convert_markdown_for_weixin`，v0.13: `_normalize_markdown_blocks`，v0.14: `_wrap_copy_friendly_lines_for_weixin(_normalize_markdown_blocks(...))`），每次更新需检查 `format_message()` 的当前状态并适配外层包装
-- **更新历史**: v0.13.0 (826 commits) Hunk #2 失败 — 上游新增 `_wrap_copy_friendly_lines_for_weixin()` 包装层，手动适配。v0.14.0 (409 commits) 同一 hunk 再次因包装层偏移失败，同样手动保留外层包装、替换内层函数
+- **更新历史**: v0.13.0 (826 commits) Hunk #2 失败 — 上游新增 `_wrap_copy_friendly_lines_for_weixin()` 包装层，手动适配。v0.14.0 (409 commits) 同一 hunk 再次因包装层偏移失败，同样手动保留外层包装、替换内层函数。v0.19.0 更新时补丁可自动应用，并通过微信格式输出实测
 
 ### 3. delegate-tool.patch
 - **文件**: `tools/delegate_tool.py`
@@ -39,12 +39,11 @@
 
 ### 6. weixin-dedup-race-fix.patch
 - **文件**: `gateway/platforms/weixin.py`
-- **改了什么**: (a) `_process_message()` 中用去掉 `[引用:…]`/`[引用媒体:…]` 前缀的纯用户文本计算 content_key（稳定 dedup key）；(b) 新增第三层去重（time-window content dedup），`_recent_content` dict 在同一同步步骤中完成检查+注册，5 秒窗口内同 sender 同 text 直接丢弃；(c) dedup 日志从 DEBUG 提升到 INFO
-- **为什么**: iLink getupdates API 把同一条消息返回两次（不同 message_id），且两次返回的 `ref_msg` 元数据可能不同 → `_extract_text()` 提取的文本不同 → 原有 content_key 不同 → 去重失败 → 重复回复
-- **根因细节**: 原有 content_key 基于 `_extract_text()` 的完整输出（含引用文本前缀），但 iLink 两次返回同一消息时 ref_msg 内容可能不一致。修复后 content_key 只用 `\n` 之后的纯用户文本计算 hash，确保两次返回产生相同的 dedup key
-- **时间窗口原理**: `_recent_content[sender:text_hash]` → check+write 是原子操作（无 await 点），消除 MessageDeduplicator check-then-register 的竞态窗口
-- **更新历史**: v0.17.0 首次添加（2026-06-21），后于 2026-06-21 补充 ref_msg 前缀剥离逻辑
-- **上游相关 PR**: #16646（content dedup with time buckets, 60s window, SHA-256）、#32406（write-before-process race fix）。两者均为 open 状态（截至 2026-06-21），均未覆盖 ref_msg 导致 content_key 不一致的问题。如需提 PR 向上游贡献，建议在 #16182 下补充 ref_msg 角度
+- **改了什么**: `_process_message()` 使用去掉 `[引用:…]`、`[引用媒体:…]` 前缀后的纯用户文本计算 content key；重复 message_id 和重复内容均记录 INFO 日志
+- **为什么**: iLink 可能用不同 message_id 重发同一消息，而且两次 `ref_msg` 元数据不同会让 `_extract_text()` 结果变化，导致普通内容哈希失效
+- **v0.19.0 适配**: 上游已经增加内容指纹去重，且 `MessageDeduplicator.is_duplicate()` 会在一次无 `await` 的同步调用中完成检查与登记，原补丁的 `_recent_content` 第三层缓存已删除，避免维护两套重复状态；自定义部分只保留引用前缀归一化和可观察日志
+- **验证**: 上游“不同 message_id、相同文本”测试通过；自定义“引用元数据变化、用户文本相同”复现测试通过；生产定向回归通过
+- **更新历史**: v0.17.0 首次添加（2026-06-21）；v0.19.0（2026-07-21）重写为基于上游原子 `MessageDeduplicator` 的轻量适配
 
 ### 7. reasoning-effort-custom-provider-run-agent.patch（已退休）
 - **原文件**: `run_agent.py`
