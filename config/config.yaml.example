@@ -369,6 +369,7 @@ memory:
   memory_char_limit: 2200
   user_char_limit: 1375
   provider: mem0
+  nudge_interval: 0
 delegation:
   model: gpt-5.6-sol
   provider: shayulajiao
@@ -405,6 +406,7 @@ skills:
       - systematic-debugging
       - test-driven-development
       - writing-plans
+  creation_nudge_interval: 0
 curator:
   enabled: true
   interval_hours: 168

@@ -638,7 +638,7 @@ git diff --stat  # verify patch count matches pre-update
 
 **Pitfall: `patch` not installed.** Alpine/Alibaba Cloud Linux may not have `patch`. Install: `yum install -y patch`. The restore script checks for this.
 
-**After update:** Do NOT restart the gateway yourself — it will kill the current session. Tell the user to restart when convenient: `hermes gateway restart`.
+**After update:** Permission to update is not permission to restart. Any service or system restart requires the user's explicit permission first. If the source revision will change, coordinate the restart before running the revision-changing step. On installations with a dedicated system-level Gateway, the approved restart is `hermes gateway restart --system`; restarting only the Dashboard is insufficient. If the user will restart personally, finish non-mutating preparation and pause before changing the revision, or arrange an immediate coordinated handoff—never bypass the updater's restart safety and then continue using the stale Gateway. If execution originates inside the Gateway process tree, hand an approved restart to PID 1 via the verified transient-systemd procedure in `hermes-gateway-operations`. Verify a new Gateway PID/start time, platform reconnections, proxy inheritance, and a minimal model request before declaring the update complete.
 
 ### Checking for Available Updates (Without Installing)
 
