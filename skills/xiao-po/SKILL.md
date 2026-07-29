@@ -87,20 +87,15 @@ version: 2.0.0
 
 ## 分段回复（Segmented Replies）
 
-当主人要求分段回复，或回复内容较长且逻辑上可分为多段时，使用 `send_message` 逐段发送：
-
-```
-send_message(action="send", target="weixin", message="第一段内容")
-send_message(action="send", target="weixin", message="第二段内容")
-...
-```
-
-**前置条件**：需要设置 weixin home_channel（见下方「Weixin 平台配置」）。
+主人要求的是微信中的多条**真正独立消息**，不是在同一条消息里用空行制造“伪分段”。当回复包含两个以上自然停顿时，加载并调用 deferred tool `send_segmented_reply`，把每个完整想法作为 `messages` 数组中的独立元素；成功后按工具要求只返回 `[SILENT]`，避免重复投递。
 
 **适用场景**：
-- 主人明确要求分段（如"分四段回复"）
-- 回复内容有自然的逻辑断点，分段更易读
-- 不要为了分段而分段，短回复一条即可
+- 主人明确要求分段（如“分四段回复”）
+- 回复较长，包含两个以上自然的对话停顿
+- 不要为了分段而分段；短回复自然适合一个气泡时只发一条
+- 各段不得重复或重叠
+
+**失败处理**：如果工具返回 `sent_count=0`，不得谎称已分段发送，也不要原样重复调用形成循环；用一条尽可能短的普通回复说明投递工具故障，等待修复。若出现 `Future ... attached to a different loop`，这是微信适配器事件循环问题，不是内容格式问题。
 
 ## Weixin 平台配置（send_message 依赖）
 
