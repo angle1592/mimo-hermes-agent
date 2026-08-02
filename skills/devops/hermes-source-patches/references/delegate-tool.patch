@@ -1,8 +1,8 @@
 diff --git a/tools/delegate_tool.py b/tools/delegate_tool.py
-index 2baf4da30..09b604834 100644
+index e75727e60..cc59ed765 100644
 --- a/tools/delegate_tool.py
 +++ b/tools/delegate_tool.py
-@@ -1157,6 +1157,7 @@ def _build_child_agent(
+@@ -1329,6 +1329,7 @@ def _build_child_agent(
  
      # Resolve the child's effective model early so it can ride on every event.
      effective_model_for_cb = model or getattr(parent_agent, "model", None)

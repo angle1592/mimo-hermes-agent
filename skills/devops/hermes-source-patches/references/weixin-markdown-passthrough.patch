@@ -1,9 +1,9 @@
 diff --git a/gateway/platforms/weixin.py b/gateway/platforms/weixin.py
-index b1247d8ea..a62f8ceba 100644
+index b44ce1ee6..3e69aed59 100644
 --- a/gateway/platforms/weixin.py
 +++ b/gateway/platforms/weixin.py
 @@ -876,6 +876,157 @@ def _pack_markdown_blocks_for_weixin(content: str, max_length: int) -> List[str]
-     return packed
+     )
  
  
 +def _rewrite_table_block_for_weixin(table_lines: List[str]) -> str:
@@ -160,7 +160,47 @@ index b1247d8ea..a62f8ceba 100644
  def _split_text_for_weixin_delivery(
      content: str, max_length: int, split_per_line: bool = False,
  ) -> List[str]:
-@@ -2254,7 +2405,7 @@ class WeixinAdapter(BasePlatformAdapter):
+@@ -1426,15 +1577,35 @@ class WeixinAdapter(BasePlatformAdapter):
+ 
+         message_id = str(message.get("message_id") or "").strip()
+         if message_id and self._dedup.is_duplicate(message_id):
++            logger.info(
++                "[%s] Msg-id-dedup: skipping msg_id=%s from %s",
++                self.name,
++                _safe_id(message_id),
++                _safe_id(sender_id),
++            )
+             return
+ 
+-        # Secondary content-fingerprint dedup for text messages
++        # Use only the user's own text for content dedup. iLink can redeliver
++        # the same message with different ref_msg metadata and message IDs.
+         item_list = message.get("item_list") or []
+         text = _extract_text(item_list)
+-        if text:
+-            content_key = f"content:{sender_id}:{hashlib.md5(text.encode()).hexdigest()}"
++        dedup_text = text
++        for ref_prefix in ("[引用媒体: ", "[引用媒体]", "[引用: "):
++            if dedup_text.startswith(ref_prefix):
++                newline = dedup_text.find("\n")
++                if newline != -1:
++                    dedup_text = dedup_text[newline + 1 :]
++                break
++
++        if dedup_text:
++            content_key = f"content:{sender_id}:{hashlib.md5(dedup_text.encode()).hexdigest()}"
+             if self._dedup.is_duplicate(content_key):
+-                logger.debug("[%s] Content-dedup: skipping duplicate message from %s", self.name, sender_id)
++                logger.info(
++                    "[%s] Content-dedup: skipping duplicate from %s text=%r",
++                    self.name,
++                    _safe_id(sender_id),
++                    dedup_text[:40],
++                )
+                 return
+ 
+         chat_type, effective_chat_id = _guess_chat_type(message, self._account_id)
+@@ -2297,7 +2468,7 @@ class WeixinAdapter(BasePlatformAdapter):
      def format_message(self, content: Optional[str]) -> str:
          if content is None:
              return ""

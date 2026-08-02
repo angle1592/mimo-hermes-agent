@@ -1,8 +1,8 @@
 diff --git a/plugins/platforms/dingtalk/adapter.py b/plugins/platforms/dingtalk/adapter.py
-index 29abe98ec..0c0b42aa6 100644
+index a564c08e6..2d4fb1462 100644
 --- a/plugins/platforms/dingtalk/adapter.py
 +++ b/plugins/platforms/dingtalk/adapter.py
-@@ -1533,23 +1533,91 @@ async def _standalone_send(
+@@ -1674,23 +1674,91 @@ async def _standalone_send(
      media_files=None,
      force_document=False,
  ):

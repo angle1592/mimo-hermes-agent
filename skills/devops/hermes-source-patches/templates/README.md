@@ -3,6 +3,11 @@
 > 更新 Hermes 后运行: `bash ~/.hermes/skills/devops/hermes-source-patches/scripts/restore-all.sh`
 > 详细说明见各 patch 文件头部注释。
 
+> **2026-08-02 v0.19.1 更新**（1406 commits）：三个补丁全部干净应用，无需手动修复。
+> 本次更新改用 `/root/.hermes-control/scripts/hermes-safe-update` 安全流程（首次演练成功），
+> 并修复了两个根因：① apply 通过 systemd-run 独立 unit 托管，避免停止 Gateway 时更新器被连带杀掉；
+> ② 候选预检排除 package-lock.json 等生成锁文件。详见 `references/update-session-2026-08-02-v0.19.1.md`。
+
 ## 修改清单
 
 ### 1. dingtalk-proactive-send.patch
