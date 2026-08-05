@@ -526,6 +526,7 @@ gateway:
   media_delivery_allow_dirs: []
   trust_recent_files: true
   trust_recent_files_seconds: 600
+  systemd_watchdog_seconds: 120
 streaming:
   enabled: false
   transport: auto
