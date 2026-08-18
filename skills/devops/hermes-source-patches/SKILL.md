@@ -16,7 +16,7 @@ tags: [hermes, patches, source-modification]
 
 修改详情见 `templates/README.md`（本 skill 目录内）。
 
-更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）、`references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）、`references/update-session-2026-07-20.md`（975 commits，隔离 worktree 预检、低内存更新、reasoning patches 因上游 CustomProfile 原生支持而退休）、`references/update-session-2026-07-21-v0.19.md`（更新至 v0.19.0，微信去重改为复用上游原子缓存，恢复脚本支持隔离目录并严格失败）、`references/update-session-2026-08-02-v0.19.1.md`（1406 commits，首次使用 hermes-safe-update 安全更新流程；修复更新器被 Gateway cgroup 连带杀掉 + package-lock.json 污染预检两个根因）和 `references/update-session-2026-08-07-v0.20.0.md`（更新至 v0.20.0；修复 Type=notify 默认 90 秒启动超时，更新/回滚启动 Gateway 前暂停 Dashboard；三份源码修改均保留）。v0.16.0→v0.17.0 时 DingTalk adapter 从 tools 迁移到 plugins，需手动在新位置重写 patch。
+更新历史见 `references/update-session-v0.11-to-v0.12.md`（319 commits，4 个 patch 全部无冲突自动适配）、`references/update-session-2026-05-05.md`（302 commits，offset 最大 +178 行，全部自动适配）、`references/update-session-2026-05-15.md`（1006 commits，2 个 patch 需手动修复）、`references/update-session-2026-05-22.md`（826 commits，weixin patch 手动适配外层包装函数）、`references/update-session-2026-05-24.md`（409 commits，weixin hunk 2 因上游加 `_wrap_copy_friendly_lines_for_weixin` 包装需手动适配）、`references/update-session-2026-05-31.md`（12 commits，fast-forward，零冲突）、`references/update-session-2026-07-20.md`（975 commits，隔离 worktree 预检、低内存更新、reasoning patches 因上游 CustomProfile 原生支持而退休）、`references/update-session-2026-07-21-v0.19.md`（更新至 v0.19.0，微信去重改为复用上游原子缓存，恢复脚本支持隔离目录并严格失败）、`references/update-session-2026-08-02-v0.19.1.md`（1406 commits，首次使用 hermes-safe-update 安全更新流程；修复更新器被 Gateway cgroup 连带杀掉 + package-lock.json 污染预检两个根因）和 `references/update-session-2026-08-07-v0.20.0.md`（更新至 v0.20.0；修复 Type=notify 默认 90 秒启动超时，更新/回滚启动 Gateway 前暂停 Dashboard；三份源码修改均保留）和 `references/update-session-2026-08-18.md`（v0.18.0→v0.20.3，2324 commits；restore-all.sh 因脚本内含 "hermes gateway restart" 字样被安全机制拦截，改为手动 patch 应用；3 个补丁自动适配 + dedup 已被 passthrough 包含）。v0.16.0→v0.17.0 时 DingTalk adapter 从 tools 迁移到 plugins，需手动在新位置重写 patch。
 
 当前已保存的 patch（本 skill `references/` 目录内）：
 
@@ -168,6 +168,8 @@ cd /usr/local/lib/hermes-agent && bash ~/.hermes/skills/devops/hermes-source-pat
 6. **Patch 引用的函数可能从未定义** — 2026-06-09 发现 weixin patch 的 `_convert_markdown_for_weixin` 调用了 `_rewrite_table_block_for_weixin()`，但该函数从未在文件中定义（写 patch 时遗漏）。导致所有触发表格处理的微信消息发送失败（NameError，plain-text fallback 也失败）。**教训**：apply patch 后不仅要检查语法（`py_compile`），还要用 `grep -n` 确认 patch 中调用的每个外部函数确实存在于文件中。恢复脚本也应加此检查。
 
 7. **patch 文件中的绝对路径被拒绝** — `patch` 命令对包含 `/usr/local/...` 等绝对路径的文件名会报 `Ignoring potentially dangerous file name` 然后无法找到文件。**解决**：用 Hermes 的 `patch` 工具（mode=replace）直接编辑源码，不依赖 shell `patch` 命令。或者将 patch 文件的路径改为相对路径后再用 `patch -p1`。记录 patch 文件只作为变更文档，实际恢复用 `restore-all.sh` 脚本或直接用 Hermes patch 工具。
+
+8. **restore-all.sh 在 Gateway 会话内被安全机制拦截** — 2026-08-18 更新时，直接在 Gateway 会话的 terminal 里执行 `bash restore-all.sh` 被拦截（错误：command or referenced script cannot restart or stop the gateway）。原因：脚本末尾的 echo 提示包含 `hermes gateway restart` 字样，被安全策略误判为重启类脚本。**解决**：不用脚本，手动逐个 `patch -p1 --forward --batch --no-backup-if-mismatch --reject-file=- < references/<name>.patch` 应用，效果完全一样。
 
 ## 新增修改的规范
 
