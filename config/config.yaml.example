@@ -1,9 +1,9 @@
 model:
-  default: gpt-5.6-sol
-  provider: shayulajiao
-  base_url: https://shayulajiao.xyz/v1
+  default: deepseek-v4-flash
+  provider: deepseek
+  base_url: ''
   reasoning_effort: medium
-  context_length: 256000
+  context_length: 1000000
 providers:
   sensenova:
     base_url: https://token.sensenova.cn/v1
@@ -19,8 +19,9 @@ providers:
     extra_headers:
       User-Agent: python-httpx
 fallback_providers:
-  - provider: deepseek
+  - provider: sensenova
     model: deepseek-v4-flash
+    base_url: https://token.sensenova.cn/v1
 toolsets:
   - hermes-cli
 agent:
@@ -363,8 +364,8 @@ memory:
   provider: mem0
   nudge_interval: 0
 delegation:
-  model: gpt-5.6-sol
-  provider: shayulajiao
+  model: deepseek-v4-flash
+  provider: deepseek
   base_url: ''
   api_key: ""
   api_mode: ''
@@ -570,7 +571,7 @@ secrets:
 paste_collapse_threshold: 5
 paste_collapse_threshold_fallback: 5
 paste_collapse_char_threshold: 2000
-_config_version: 37
+_config_version: 39
 mcp_servers:
   filesystem:
     args:
